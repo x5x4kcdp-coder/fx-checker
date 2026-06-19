@@ -354,14 +354,20 @@ ${data.stopPlan || ""}`
     aiResult && (forceWaitByText || forceWaitByRisk || forceWaitByConfidence);
 
   if (shouldForceWait && result) {
-    if (
-      entryTextForGuard.includes("戻り売り") ||
+    const scoreDiffForGuard = Math.abs(Number(result.long || 0) - Number(result.short || 0));
+
+    if (scoreDiffForGuard <= 10 && confidenceForGuard <= 50) {
+      result.statusText = "方向待ち";
+    } else if (
+      entryTextForGuard.includes("戻り売り待ち") ||
+      entryTextForGuard.includes("戻り売り候補") ||
       entryTextForGuard.includes("戻り後") ||
       entryTextForGuard.includes("付近への戻り")
     ) {
       result.statusText = "戻り売り待ち";
     } else if (
-      entryTextForGuard.includes("押し目") ||
+      entryTextForGuard.includes("押し目待ち") ||
+      entryTextForGuard.includes("押し目買い候補") ||
       entryTextForGuard.includes("押し目後")
     ) {
       result.statusText = "押し目待ち";
@@ -591,6 +597,7 @@ ${(aiResult.reasons || []).map((r) => `・${r}`).join("\n")}`;
 }
 
 export default App;
+
 
 
 
