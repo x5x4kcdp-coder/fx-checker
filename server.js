@@ -75,6 +75,24 @@ function buildPrompt(mode, pair) {
 - takeProfitPlan は利確目安を書く
 - stopPlan は損切り/撤退目安を書く
 
+重要な方向一致ルール:
+- decision が LONG の場合、entryTrigger は必ずロング条件を書く
+- decision が SHORT の場合、entryTrigger は必ずショート条件を書く
+- decision が WAIT の場合、無理にロング条件やショート条件を書かない
+- decision が WAIT かつ longScore と shortScore が近い場合、entryTrigger には「何が揃うまで待つか」を書く
+- decision が WAIT でも shortScore が longScore より明確に高い場合、entryTrigger は「ショート検討に変わる条件」を書く
+- decision が WAIT でも longScore が shortScore より明確に高い場合、entryTrigger は「ロング検討に変わる条件」を書く
+- 危険条件とentryTriggerの方向を矛盾させない
+- 例: riskAlertsで「5分足と15分足MACDが下降傾向」と書いた場合、entryTriggerでロング条件を優先して書かない
+- 例: 上位足ロング、短期足ショートで混在している場合は「見送り。上位足と短期足の方向一致待ち」と書く
+- 例: ショート寄りWAITなら「戻り売り条件」を書き、ロング条件はcancelCondition側に書く
+- 例: ロング寄りWAITなら「押し目買い条件」を書き、ショート条件はcancelCondition側に書く
+
+WAIT時の書き方:
+- entryTrigger は「今すぐ入る条件」ではなく「次にエントリー候補になる条件」を書く
+- cancelCondition は「その候補が消える条件」を書く
+- direction が混在している場合、entryTrigger は「方向一致まで待ち」とする
+
 形式:
 {
   "decision": "LONG" | "SHORT" | "WAIT",
@@ -138,6 +156,24 @@ function buildPrompt(mode, pair) {
 - cancelCondition はその方向の見送り条件・取消条件を書く
 - takeProfitPlan は利確目安を書く
 - stopPlan は損切り/撤退目安を書く
+
+重要な方向一致ルール:
+- decision が LONG の場合、entryTrigger は必ずロング条件を書く
+- decision が SHORT の場合、entryTrigger は必ずショート条件を書く
+- decision が WAIT の場合、無理にロング条件やショート条件を書かない
+- decision が WAIT かつ longScore と shortScore が近い場合、entryTrigger には「何が揃うまで待つか」を書く
+- decision が WAIT でも shortScore が longScore より明確に高い場合、entryTrigger は「ショート検討に変わる条件」を書く
+- decision が WAIT でも longScore が shortScore より明確に高い場合、entryTrigger は「ロング検討に変わる条件」を書く
+- 危険条件とentryTriggerの方向を矛盾させない
+- 例: riskAlertsで「5分足と15分足MACDが下降傾向」と書いた場合、entryTriggerでロング条件を優先して書かない
+- 例: 上位足ロング、短期足ショートで混在している場合は「見送り。上位足と短期足の方向一致待ち」と書く
+- 例: ショート寄りWAITなら「戻り売り条件」を書き、ロング条件はcancelCondition側に書く
+- 例: ロング寄りWAITなら「押し目買い条件」を書き、ショート条件はcancelCondition側に書く
+
+WAIT時の書き方:
+- entryTrigger は「今すぐ入る条件」ではなく「次にエントリー候補になる条件」を書く
+- cancelCondition は「その候補が消える条件」を書く
+- direction が混在している場合、entryTrigger は「方向一致まで待ち」とする
 
 形式:
 {
@@ -248,5 +284,6 @@ const PORT = process.env.PORT || 8787;
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`AI server running: http://0.0.0.0:${PORT}`);
 });
+
 
 
