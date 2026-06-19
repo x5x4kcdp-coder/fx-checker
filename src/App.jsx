@@ -448,33 +448,6 @@ ${data.stopPlan || ""}`
         </section>
       )}
 
-      <section className="checks">
-        {checks.map((check) => (
-          <div className="check" key={check.id}>
-            <h3>{check.title}</h3>
-            <div className="options">
-              {check.options.map((option) => (
-                <label
-                  key={option.label}
-                  className={`${answers[check.id] === option.label ? "selected" : ""} ${option.side}`}
-                >
-                  <input
-                    type="radio"
-                    name={check.id}
-                    checked={answers[check.id] === option.label}
-                    onChange={() => {
-                      setAiResult(null);
-                      setAnswers({ ...answers, [check.id]: option.label });
-                    }}
-                  />
-                  {option.label}
-                </label>
-              ))}
-            </div>
-          </div>
-        ))}
-      </section>
-
       <section className="memo">
         <h3>エントリーメモ</h3>
         <textarea

@@ -510,3 +510,8 @@ footer {
     grid-template-columns: 1fr;
   }
 }
+
+/* 手動チェック欄を非表示 */
+.checks {
+  display: none !important;
+}
