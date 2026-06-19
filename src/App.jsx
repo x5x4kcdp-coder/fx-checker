@@ -312,6 +312,71 @@ ${data.stopPlan || ""}`
   const riskTextForGuard = Array.isArray(riskAlerts) ? riskAlerts.join(" ") : "";
   const confidenceForGuard = Number(aiResult?.confidence ?? 0);
 
+  const forceWaitKeywords = [
+    "新規成行禁止",
+    "成行禁止",
+    "戻り売り待ち",
+    "戻り待ち",
+    "押し目待ち",
+    "待ち",
+    "確認後",
+    "候補",
+    "〜後",
+    "戻り後",
+    "押し目後",
+    "付近への戻り",
+    "反落",
+    "反発",
+  ];
+
+  const riskWaitKeywords = [
+    "追い売り",
+    "追い買い",
+    "乖離",
+    "直近安値",
+    "直近高値",
+  ];
+
+  const forceWaitByText = forceWaitKeywords.some((word) =>
+    entryTextForGuard.includes(word)
+  );
+
+  const forceWaitByRisk = riskWaitKeywords.some((word) =>
+    riskTextForGuard.includes(word)
+  );
+
+  const forceWaitByConfidence =
+    aiResult && confidenceForGuard < 50;
+
+  const shouldForceWait =
+    aiResult && (forceWaitByText || forceWaitByRisk || forceWaitByConfidence);
+
+  if (shouldForceWait && result) {
+    if (
+      entryTextForGuard.includes("戻り売り") ||
+      entryTextForGuard.includes("戻り後") ||
+      entryTextForGuard.includes("付近への戻り")
+    ) {
+      result.statusText = "戻り売り待ち";
+    } else if (
+      entryTextForGuard.includes("押し目") ||
+      entryTextForGuard.includes("押し目後")
+    ) {
+      result.statusText = "押し目待ち";
+    } else {
+      result.statusText = "待ち";
+    }
+
+    if (aiResult) {
+      aiResult.entryStatus = "WAIT";
+    }
+  }
+
+  // 安全装置：AI本文と状態ラベルの矛盾をフロント側で補正
+  const entryTextForGuard = `${entryCard.entryTrigger || ""} ${aiResult?.summary || ""}`;
+  const riskTextForGuard = Array.isArray(riskAlerts) ? riskAlerts.join(" ") : "";
+  const confidenceForGuard = Number(aiResult?.confidence ?? 0);
+
   const forceWaitByText =
     entryTextForGuard.includes("新規成行禁止") ||
     entryTextForGuard.includes("戻り売り待ち") ||
@@ -564,6 +629,7 @@ ${(aiResult.reasons || []).map((r) => `・${r}`).join("\n")}`;
 }
 
 export default App;
+
 
 
 
