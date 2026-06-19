@@ -307,6 +307,51 @@ ${data.stopPlan || ""}`
     stopPlan: aiResult?.stopPlan || "AI判定後に表示されます。",
   };
 
+  const chatCopyText = useMemo(() => {
+    if (!aiResult) return "";
+
+    return `【FXチェック結果】
+モード：${currentMode.name}
+判定：${result.direction}
+状態：${result.statusText}
+LONG：${result.long}点
+SHORT：${result.short}点
+差：${result.diff}点
+信頼度：${aiResult.confidence ?? "-"}点
+
+総評：
+${aiResult.summary || "-"}
+
+危険条件：
+${riskAlerts.length > 0 ? riskAlerts.map((r) => `・${r}`).join("\n") : "・特になし"}
+
+ENTRY：
+${entryCard.entryTrigger}
+
+CANCEL：
+${entryCard.cancelCondition}
+
+TP：
+${entryCard.takeProfitPlan}
+
+STOP：
+${entryCard.stopPlan}
+
+AI理由：
+${(aiResult.reasons || []).map((r) => `・${r}`).join("\n")}`;
+  }, [aiResult, currentMode.name, result, riskAlerts, entryCard]);
+
+  const copyForChat = async () => {
+    if (!chatCopyText) return;
+
+    try {
+      await navigator.clipboard.writeText(chatCopyText);
+      alert("ChatGPT用テキストをコピーしました。");
+    } catch {
+      alert("コピーに失敗しました。テキスト欄から手動でコピーしてください。");
+    }
+  };
+
   return (
     <div className="app">
       <header className="header">
@@ -399,6 +444,21 @@ ${data.stopPlan || ""}`
         </section>
       )}
 
+      {aiResult && (
+        <section className="copyBox">
+          <div className="copyHeader">
+            <h3>ChatGPTに送る用テキスト</h3>
+            <button onClick={copyForChat}>コピーする</button>
+          </div>
+
+          <textarea
+            className="copyText"
+            value={chatCopyText}
+            readOnly
+          />
+        </section>
+      )}
+
       <section className="bulkBox">
         <h3>一括アップロード</h3>
         <p>下の順番で4枚まとめて選択してください。</p>
@@ -465,6 +525,8 @@ ${data.stopPlan || ""}`
 }
 
 export default App;
+
+
 
 
 

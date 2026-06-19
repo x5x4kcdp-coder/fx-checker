@@ -515,3 +515,59 @@ footer {
 .checks {
   display: none !important;
 }
+
+.copyBox {
+  background: #0f1d2a;
+  border: 1px solid #4c6884;
+  border-radius: 18px;
+  padding: 16px;
+  margin: 18px 0;
+}
+
+.copyHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.copyHeader h3 {
+  margin: 0;
+  color: #ffffff;
+}
+
+.copyHeader button {
+  border: none;
+  border-radius: 12px;
+  background: #22c55e;
+  color: white;
+  font-weight: 900;
+  padding: 10px 16px;
+  cursor: pointer;
+}
+
+.copyText {
+  width: 100%;
+  min-height: 260px;
+  resize: vertical;
+  background: #06111a;
+  color: #eaf2f8;
+  border: 1px solid #29445e;
+  border-radius: 14px;
+  padding: 14px;
+  font-size: 14px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+
+@media (max-width: 900px) {
+  .copyHeader {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .copyHeader button {
+    width: 100%;
+  }
+}
