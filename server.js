@@ -68,6 +68,13 @@ function buildPrompt(mode, pair) {
 
 必ずJSONだけで返してください。コードブロックは禁止。
 
+追加ルール:
+- riskAlerts は危険条件を0〜4個の配列で返す
+- entryTrigger はエントリーしてよい条件を具体的に書く
+- cancelCondition はその方向の見送り条件・取消条件を書く
+- takeProfitPlan は利確目安を書く
+- stopPlan は損切り/撤退目安を書く
+
 形式:
 {
   "decision": "LONG" | "SHORT" | "WAIT",
@@ -80,6 +87,9 @@ function buildPrompt(mode, pair) {
   "risk": "注意点",
   "entryPlan": "押し目ロングなら何を待つか",
   "takeProfitPlan": "長期保有/分割利確/スワップ目線の管理",
+  "riskAlerts": ["危険条件1", "危険条件2"],
+  "entryTrigger": "エントリーしてよい条件",
+  "cancelCondition": "この条件なら見送り",
   "stopPlan": "撤退・見送りライン"
 }
 `;
@@ -122,6 +132,13 @@ function buildPrompt(mode, pair) {
 
 必ずJSONだけで返してください。コードブロックは禁止。
 
+追加ルール:
+- riskAlerts は危険条件を0〜4個の配列で返す
+- entryTrigger はエントリーしてよい条件を具体的に書く
+- cancelCondition はその方向の見送り条件・取消条件を書く
+- takeProfitPlan は利確目安を書く
+- stopPlan は損切り/撤退目安を書く
+
 形式:
 {
   "decision": "LONG" | "SHORT" | "WAIT",
@@ -134,6 +151,9 @@ function buildPrompt(mode, pair) {
   "risk": "注意点",
   "entryPlan": "入るならどこを待つか",
   "takeProfitPlan": "利確の目安",
+  "riskAlerts": ["危険条件1", "危険条件2"],
+  "entryTrigger": "エントリーしてよい条件",
+  "cancelCondition": "この条件なら見送り",
   "stopPlan": "損切り/撤退の目安"
 }
 `;
@@ -228,4 +248,5 @@ const PORT = process.env.PORT || 8787;
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`AI server running: http://0.0.0.0:${PORT}`);
 });
+
 

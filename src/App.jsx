@@ -288,6 +288,25 @@ ${data.stopPlan || ""}`
     resetAll();
   };
 
+  const riskAlerts = useMemo(() => {
+    if (!aiResult) return [];
+
+    if (Array.isArray(aiResult.riskAlerts) && aiResult.riskAlerts.length > 0) {
+      return aiResult.riskAlerts;
+    }
+
+    if (aiResult.risk) return [aiResult.risk];
+
+    return [];
+  }, [aiResult]);
+
+  const entryCard = {
+    entryTrigger: aiResult?.entryTrigger || aiResult?.entryPlan || "AI判定後に表示されます。",
+    cancelCondition: aiResult?.cancelCondition || "AI判定後に表示されます。",
+    takeProfitPlan: aiResult?.takeProfitPlan || "AI判定後に表示されます。",
+    stopPlan: aiResult?.stopPlan || "AI判定後に表示されます。",
+  };
+
   return (
     <div className="app">
       <header className="header">
@@ -336,6 +355,49 @@ ${data.stopPlan || ""}`
       <button className="aiButton" onClick={analyzeWithAi} disabled={loading}>
         {loading ? "AI判定中..." : "スクショからAI自動チェック"}
       </button>
+
+      {aiResult && (
+        <section className="tradeCards">
+          <div className="dangerAlert">
+            <h3>危険条件アラート</h3>
+            {riskAlerts.length > 0 ? (
+              <ul>
+                {riskAlerts.map((alert, i) => (
+                  <li key={i}>{alert}</li>
+                ))}
+              </ul>
+            ) : (
+              <p>大きな危険条件は検出されていません。</p>
+            )}
+          </div>
+
+          <div className="entryCards">
+            <div className="planCard entry">
+              <span>ENTRY</span>
+              <h3>エントリー条件</h3>
+              <p>{entryCard.entryTrigger}</p>
+            </div>
+
+            <div className="planCard cancel">
+              <span>CANCEL</span>
+              <h3>取消条件</h3>
+              <p>{entryCard.cancelCondition}</p>
+            </div>
+
+            <div className="planCard profit">
+              <span>TAKE PROFIT</span>
+              <h3>利確目安</h3>
+              <p>{entryCard.takeProfitPlan}</p>
+            </div>
+
+            <div className="planCard stop">
+              <span>STOP</span>
+              <h3>損切り/撤退目安</h3>
+              <p>{entryCard.stopPlan}</p>
+            </div>
+          </div>
+        </section>
+      )}
 
       <section className="bulkBox">
         <h3>一括アップロード</h3>
@@ -430,5 +492,7 @@ ${data.stopPlan || ""}`
 }
 
 export default App;
+
+
 
 

@@ -401,3 +401,112 @@ footer {
     grid-template-columns: 1fr;
   }
 }
+.tradeCards {
+  margin: 18px 0;
+  display: grid;
+  gap: 16px;
+}
+
+.dangerAlert {
+  background: linear-gradient(135deg, rgba(255, 78, 78, 0.18), rgba(255, 150, 80, 0.08));
+  border: 2px solid #ff6b6b;
+  border-radius: 18px;
+  padding: 18px;
+  box-shadow: 0 0 22px rgba(255, 80, 80, 0.15);
+}
+
+.dangerAlert h3 {
+  margin: 0 0 12px;
+  color: #ff9f9f;
+  font-size: 22px;
+}
+
+.dangerAlert ul {
+  margin: 0;
+  padding-left: 22px;
+}
+
+.dangerAlert li {
+  margin-bottom: 8px;
+  color: #ffe2e2;
+  font-weight: 800;
+  line-height: 1.5;
+}
+
+.dangerAlert p {
+  color: #dce8f5;
+  font-weight: 700;
+}
+
+.entryCards {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+
+.planCard {
+  border-radius: 18px;
+  padding: 18px;
+  background: #0f1d2a;
+  border: 1px solid #39566f;
+}
+
+.planCard span {
+  display: inline-block;
+  margin-bottom: 8px;
+  font-size: 12px;
+  letter-spacing: 0.12em;
+  font-weight: 900;
+  opacity: 0.8;
+}
+
+.planCard h3 {
+  margin: 0 0 10px;
+  font-size: 20px;
+  color: white;
+}
+
+.planCard p {
+  margin: 0;
+  color: #dce8f5;
+  font-weight: 700;
+  line-height: 1.6;
+}
+
+.planCard.entry {
+  border-color: #49d17d;
+}
+
+.planCard.entry span {
+  color: #49d17d;
+}
+
+.planCard.cancel {
+  border-color: #ffd166;
+}
+
+.planCard.cancel span {
+  color: #ffd166;
+}
+
+.planCard.profit {
+  border-color: #5db7ff;
+}
+
+.planCard.profit span {
+  color: #5db7ff;
+}
+
+.planCard.stop {
+  border-color: #ff6b6b;
+}
+
+.planCard.stop span {
+  color: #ff6b6b;
+}
+
+@media (max-width: 900px) {
+  .entryCards {
+    grid-template-columns: 1fr;
+  }
+}
