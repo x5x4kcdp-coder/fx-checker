@@ -307,6 +307,8 @@ ${data.stopPlan || ""}`
     stopPlan: aiResult?.stopPlan || "AI判定後に表示されます。",
   };
 
+
+
   // 安全装置：AI本文と状態ラベルの矛盾をフロント側で補正
   const entryTextForGuard = `${entryCard.entryTrigger || ""} ${aiResult?.summary || ""}`;
   const riskTextForGuard = Array.isArray(riskAlerts) ? riskAlerts.join(" ") : "";
@@ -371,46 +373,6 @@ ${data.stopPlan || ""}`
       aiResult.entryStatus = "WAIT";
     }
   }
-
-  // 安全装置：AI本文と状態ラベルの矛盾をフロント側で補正
-  const entryTextForGuard = `${entryCard.entryTrigger || ""} ${aiResult?.summary || ""}`;
-  const riskTextForGuard = Array.isArray(riskAlerts) ? riskAlerts.join(" ") : "";
-  const confidenceForGuard = Number(aiResult?.confidence ?? 0);
-
-  const forceWaitByText =
-    entryTextForGuard.includes("新規成行禁止") ||
-    entryTextForGuard.includes("戻り売り待ち") ||
-    entryTextForGuard.includes("押し目待ち") ||
-    entryTextForGuard.includes("確認後") ||
-    entryTextForGuard.includes("候補");
-
-  const forceWaitByRisk =
-    riskTextForGuard.includes("追い売り") ||
-    riskTextForGuard.includes("追い買い") ||
-    riskTextForGuard.includes("乖離") ||
-    riskTextForGuard.includes("直近安値") ||
-    riskTextForGuard.includes("直近高値");
-
-  const forceWaitByConfidence =
-    aiResult && confidenceForGuard < 50;
-
-  const shouldForceWait =
-    aiResult && (forceWaitByText || forceWaitByRisk || forceWaitByConfidence);
-
-  if (shouldForceWait && result) {
-    if (entryTextForGuard.includes("戻り売り")) {
-      result.statusText = "戻り売り待ち";
-    } else if (entryTextForGuard.includes("押し目")) {
-      result.statusText = "押し目待ち";
-    } else {
-      result.statusText = "待ち";
-    }
-
-    if (aiResult) {
-      aiResult.entryStatus = "WAIT";
-    }
-  }
-
   const chatCopyText = useMemo(() => {
     if (!aiResult) return "";
 
@@ -629,6 +591,9 @@ ${(aiResult.reasons || []).map((r) => `・${r}`).join("\n")}`;
 }
 
 export default App;
+
+
+
 
 
 
