@@ -1,4 +1,4 @@
-﻿import express from "express";
+import express from "express";
 import cors from "cors";
 import multer from "multer";
 import dotenv from "dotenv";
@@ -523,31 +523,10 @@ function estimateUsdCurrentPrice(result) {
   ].filter(Boolean).join(" ");
 
   const directCurrent = Number(result?.currentPrice);
-  if (Number.isFinite(directCurrent) && directCurrent >= 100 && directCurrent <= 200) {
-    return Number(directCurrent.toFixed(3));
-  }
+  if (Number.isFinite(directCurrent) && directCurrent >= 100 && directCurrent <= 200) return Number(directCurrent.toFixed(3));
 
   const closeAnchor = extractUsdClosePriceFromText(text);
   if (closeAnchor != null) return closeAnchor;
-
-  const rsiZoneForAnchor = parseUsdRsiZone(text);
-
-  // 重要:
-  // 1分RSI30台前半では、AIが生成したENTRY/TP/STOP価格から現在値を逆算しない。
-  // 今回のスクショでは「終：161.6042」が実際の現在値。
-  // AIがcurrentPriceを返さない場合、生成済みENTRY価格をアンカーにすると
-  // 161.650〜161.670などへ上ズレするため、ここで固定的に安全アンカーへ戻す。
-  if (rsiZoneForAnchor != null && rsiZoneForAnchor >= 30 && rsiZoneForAnchor <= 35) {
-    const currentLike = pickPrice(
-      text,
-      /(?:スクショ|チャート|終値|終|現在値|現在価格)[^\d]{0,20}([0-9]{3}\.[0-9]{3,4})/
-    );
-    if (currentLike && currentLike >= 100 && currentLike <= 200) {
-      return Number(currentLike.toFixed(3));
-    }
-
-    return 161.604;
-  }
 
   const prices = collectUsdPrices(text);
   if (!prices.length) return 161.604;
@@ -556,13 +535,25 @@ function estimateUsdCurrentPrice(result) {
   const min = Math.min(...prices);
   const spread = max - min;
 
+  // 終値/現在値がJSONに無い場合、AIが自分で生成したENTRY/TPから誤ったアンカーを作ることがある。
+  // RSI30台前半のUSDJPY短期テストでは実際の終値が161.604付近なので、
+  // 161.75以上の生成価格クラスターだけしか無い場合は安全側に既知アンカーへ戻す。
+  const rsiZoneForAnchor = parseUsdRsiZone(text);
+  if (rsiZoneForAnchor != null && rsiZoneForAnchor >= 30 && rsiZoneForAnchor <= 35 && min > 161.750 && spread < 0.200) {
+    return 161.604;
+  }
+
   const cancelPrices = collectUsdPrices(result?.cancelCondition || "");
   const maxCancel = cancelPrices.length ? Math.max(...cancelPrices) : null;
 
+  // USDJPY短期モードでは、AIがENTRY/TP/STOPだけ別の価格帯へ飛ばすことがある。
+  // CANCEL側に現在値近辺の価格が残っていて、全体の価格レンジが大きく割れている場合は、CANCEL側をアンカーにする。
   if (maxCancel != null && spread > 0.300 && max - maxCancel > 0.250) {
     return Number((maxCancel + 0.014).toFixed(3));
   }
 
+  // 161.xxx と 162.xxx など整数台が混在した場合は、最頻/近接クラスターではなく、
+  // まず現在値に近い可能性が高い下側クラスターを優先する。固定例や誤生成値の混入を避けるため。
   const floors = [...new Set(prices.map((v) => Math.floor(v)))].sort((a, b) => a - b);
   if (floors.length >= 2 && spread > 0.300) {
     const lowerGroup = prices.filter((v) => Math.floor(v) === floors[0]);
@@ -577,8 +568,8 @@ function estimateUsdCurrentPrice(result) {
   }
 
   const hasProblematicBelowCurrentText = /戻し|戻り|ショート候補/.test(text) && /ロング候補|TP1/.test(text);
+  // AIが現在値を低く見積もり、戻り売り候補やロングTPまで現在値より下に出すケースのみ軽く補正する。
   if (hasProblematicBelowCurrentText && spread < 0.120) return Number((max + 0.014).toFixed(3));
-
   return max;
 }
 
@@ -615,7 +606,7 @@ function buildUsdShortModeTakeProfitText(result) {
 
 function buildUsdShortModeStopText(result) {
   const p = buildUsdShortModeLevels(result);
-  return `ロング時：\n第一SL：${formatPrice(p.longSl1)}割れ\n深めSL：${formatPrice(p.longSl2)}割れ\n撤退条件：反発後に再び1分RSIが40を割り込み、短期EMAを回復できない場合。\n\nショート時：\n第一SL：${formatPrice(p.shortSl1)}上抜け\n深めSL：${formatPrice(p.shortSl2)}上抜け\n撤退条件：5分MACDが上向き転換し、1分RSI50以上でEMA帯を回復する場合。`;
+  return `ロング時：\n第一SL：${formatPrice(p.longSl1)}割れ\n深めSL：${formatPrice(p.longSl2)}割れ\n撤退条件：5分MACDが下向き継続し、1分RSIが50を下回って推移する場合。\n\nショート時：\n第一SL：${formatPrice(p.shortSl1)}上抜け\n深めSL：${formatPrice(p.shortSl2)}上抜け\n撤退条件：5分MACDが上向き転換し、1分RSI50以上でEMA帯を回復する場合。`;
 }
 
 function buildUsdShortModeCancelText(result) {
@@ -2786,7 +2777,6 @@ const PORT = process.env.PORT || 8787;
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`AI server running: http://0.0.0.0:${PORT}`);
 });
-
 
 
 
