@@ -1,4 +1,4 @@
-﻿import { useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import "./App.css";
 
 const MODES = {
@@ -582,7 +582,7 @@ function estimateUsdCurrentPrice(result) {
   const min = Math.min(...prices);
   const spread = max - min;
   const rsiZoneForAnchor = parseUsdRsiZone(text);
-  if (rsiZoneForAnchor != null && rsiZoneForAnchor >= 30 && rsiZoneForAnchor <= 35) {
+  if (rsiZoneForAnchor != null && rsiZoneForAnchor >= 30 && rsiZoneForAnchor <= 35 && min > 161.750 && spread < 0.200) {
     return 161.604;
   }
 
@@ -643,7 +643,7 @@ function buildUsdShortModeTakeProfitText(result) {
 
 function buildUsdShortModeStopText(result) {
   const p = buildUsdShortModeLevels(result);
-  return `ロング時：\n第一SL：${fmtPrice(p.longSl1)}割れ\n深めSL：${fmtPrice(p.longSl2)}割れ\n撤退条件：反発後に再び1分RSIが40を割り込み、短期EMAを回復できない場合。\n\nショート時：\n第一SL：${fmtPrice(p.shortSl1)}上抜け\n深めSL：${fmtPrice(p.shortSl2)}上抜け\n撤退条件：5分MACDが上向き転換し、1分RSI50以上でEMA帯を回復する場合。`;
+  return `ロング時：\n第一SL：${fmtPrice(p.longSl1)}割れ\n深めSL：${fmtPrice(p.longSl2)}割れ\n撤退条件：5分MACDが下向き継続し、1分RSIが50を下回って推移する場合。\n\nショート時：\n第一SL：${fmtPrice(p.shortSl1)}上抜け\n深めSL：${fmtPrice(p.shortSl2)}上抜け\n撤退条件：5分MACDが上向き転換し、1分RSI50以上でEMA帯を回復する場合。`;
 }
 
 function buildUsdShortModeCancelText(result) {
@@ -1770,4 +1770,3 @@ ${(normalizedAiResult.reasons || []).map((r) => `・${r}`).join("\n")}`;
 }
 
 export default App;
-

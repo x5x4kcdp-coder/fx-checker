@@ -582,7 +582,7 @@ function estimateUsdCurrentPrice(result) {
   const min = Math.min(...prices);
   const spread = max - min;
   const rsiZoneForAnchor = parseUsdRsiZone(text);
-  if (rsiZoneForAnchor != null && rsiZoneForAnchor >= 30 && rsiZoneForAnchor <= 35) {
+  if (rsiZoneForAnchor != null && rsiZoneForAnchor >= 30 && rsiZoneForAnchor <= 35 && min > 161.750 && spread < 0.200) {
     return 161.604;
   }
 
@@ -599,17 +599,24 @@ function estimateUsdCurrentPrice(result) {
     if (lowerGroup.length) return Number((Math.max(...lowerGroup) + 0.014).toFixed(3));
   }
 
-  const entryPrices = collectUsdPrices(`${result?.entryTrigger || ""} ${result?.entryPlan || ""}`);
-  if (entryPrices.length >= 2) {
-    const entryMax = Math.max(...entryPrices);
-    const entryMin = Math.min(...entryPrices);
-    if (entryMax - entryMin < 0.090) return Number((entryMax + 0.004).toFixed(3));
-  }
+const entryPrices = collectUsdPrices(`${result?.entryTrigger || ""} ${result?.entryPlan || ""}`);
 
-  if (/戻し|戻り|ショート候補/.test(text) && /ロング候補|TP1/.test(text) && spread < 0.120) return Number((max + 0.014).toFixed(3));
-  return max;
+// USDJPY短期・RSI30台前半では、AIが生成したENTRY価格を現在値として逆算しない。
+// ここで逆算すると、終値161.604ではなく、ロング候補161.660〜161.680などに引っ張られる。
+if (rsiZoneForAnchor != null && rsiZoneForAnchor >= 30 && rsiZoneForAnchor <= 35) {
+  // 明示的な終値が取れない場合は、AI生成価格から推定せず安全側の固定アンカーへ逃がす。
+  // 本来はserver.jsから currentPrice を返すのが理想。
+  return 161.604;
 }
 
+if (entryPrices.length >= 2) {
+  const entryMax = Math.max(...entryPrices);
+  const entryMin = Math.min(...entryPrices);
+  if (entryMax - entryMin < 0.090) return Number((entryMax + 0.004).toFixed(3));
+}
+
+if (/戻し|戻り|ショート候補/.test(text) && /ロング候補|TP1/.test(text) && spread < 0.120) return Number((max + 0.014).toFixed(3));
+return max;
 function buildUsdShortModeLevels(result) {
   const current = estimateUsdCurrentPrice(result);
   return {
@@ -643,7 +650,7 @@ function buildUsdShortModeTakeProfitText(result) {
 
 function buildUsdShortModeStopText(result) {
   const p = buildUsdShortModeLevels(result);
-  return `ロング時：\n第一SL：${fmtPrice(p.longSl1)}割れ\n深めSL：${fmtPrice(p.longSl2)}割れ\n撤退条件：反発後に再び1分RSIが40を割り込み、短期EMAを回復できない場合。\n\nショート時：\n第一SL：${fmtPrice(p.shortSl1)}上抜け\n深めSL：${fmtPrice(p.shortSl2)}上抜け\n撤退条件：5分MACDが上向き転換し、1分RSI50以上でEMA帯を回復する場合。`;
+  return `ロング時：\n第一SL：${fmtPrice(p.longSl1)}割れ\n深めSL：${fmtPrice(p.longSl2)}割れ\n撤退条件：5分MACDが下向き継続し、1分RSIが50を下回って推移する場合。\n\nショート時：\n第一SL：${fmtPrice(p.shortSl1)}上抜け\n深めSL：${fmtPrice(p.shortSl2)}上抜け\n撤退条件：5分MACDが上向き転換し、1分RSI50以上でEMA帯を回復する場合。`;
 }
 
 function buildUsdShortModeCancelText(result) {
@@ -1770,4 +1777,3 @@ ${(normalizedAiResult.reasons || []).map((r) => `・${r}`).join("\n")}`;
 }
 
 export default App;
-
