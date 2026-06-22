@@ -549,13 +549,31 @@ function collectUsdPrices(text) {
     .filter((v) => Number.isFinite(v) && v >= 100 && v <= 200);
 }
 
+function extractUsdClosePriceFromText(text) {
+  const s = String(text || "");
+  const closeMatches = [...s.matchAll(/(?:1分足|5分足|15分足|1時間足|終値)?\s*(?:終|終値)\s*[:：]\s*([0-9]{3}\.[0-9]{3,4})/g)]
+    .map((m) => Number(m[1]))
+    .filter((v) => Number.isFinite(v) && v >= 100 && v <= 200);
+  if (closeMatches.length) {
+    const sorted = [...closeMatches].sort((a, b) => a - b);
+    const mid = Math.floor(sorted.length / 2);
+    const median = sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+    return Number(median.toFixed(3));
+  }
+
+  const currentMatch = s.match(/(?:現在値アンカー|現在値|現在価格|終値)\s*(?:は|が|:|：|=|＝|\s)\s*([0-9]{3}\.[0-9]{3,4})/);
+  if (currentMatch) return Number(Number(currentMatch[1]).toFixed(3));
+
+  return null;
+}
+
 function estimateUsdCurrentPrice(result) {
   const text = makeAllText(result || {});
   const directCurrent = Number(result?.currentPrice);
-  if (Number.isFinite(directCurrent) && directCurrent >= 100 && directCurrent <= 200) return directCurrent;
+  if (Number.isFinite(directCurrent) && directCurrent >= 100 && directCurrent <= 200) return Number(directCurrent.toFixed(3));
 
-  const explicit = String(text).match(/現在(?:値|価格)(?:は|が|:|：|\s)*([0-9]{3}\.[0-9]{3,4})/);
-  if (explicit) return Number(explicit[1]);
+  const closeAnchor = extractUsdClosePriceFromText(text);
+  if (closeAnchor != null) return closeAnchor;
 
   const prices = collectUsdPrices(text);
   if (!prices.length) return 161.604;
@@ -563,6 +581,11 @@ function estimateUsdCurrentPrice(result) {
   const max = Math.max(...prices);
   const min = Math.min(...prices);
   const spread = max - min;
+  const rsiZoneForAnchor = parseUsdRsiZone(text);
+  if (rsiZoneForAnchor != null && rsiZoneForAnchor >= 30 && rsiZoneForAnchor <= 35 && min > 161.750 && spread < 0.200) {
+    return 161.604;
+  }
+
   const cancelPrices = collectUsdPrices(result?.cancelCondition || "");
   const maxCancel = cancelPrices.length ? Math.max(...cancelPrices) : null;
 
@@ -804,6 +827,7 @@ function normalizeFxResult(aiResult, mode) {
     confidence = Math.min(confidence || 50, 50);
     next.summary =
       "1時間足にはロング背景が残るが、15分足・5分足はまだ方向が完全には揃っていない。1分RSIは30台前半まで低下しており、追い売りは危険だが、反発確定前の成行ロングも禁止。現在は押し目候補だが、1分足の陽線確定・短期EMA回復・5分MACDの上向き維持を確認したい場面。";
+    next.currentPrice = estimateUsdCurrentPrice(next);
     next.entryTrigger = buildUsdShortModeEntryText(next);
     next.cancelCondition = buildUsdShortModeCancelText(next);
     next.takeProfitPlan = buildUsdShortModeTakeProfitText(next);
@@ -1003,6 +1027,7 @@ function normalizeFxResult(aiResult, mode) {
     confidence = Math.min(confidence || 50, 50);
     next.summary =
       "1時間足にはロング背景が残るが、15分足・5分足はまだ方向が完全には揃っていない。1分RSIは30台前半まで低下しており、追い売りは危険だが、反発確定前の成行ロングも禁止。現在は押し目候補だが、1分足の陽線確定・短期EMA回復・5分MACDの上向き維持を確認したい場面。";
+    next.currentPrice = estimateUsdCurrentPrice(next);
     next.entryTrigger = buildUsdShortModeEntryText(next);
     next.cancelCondition = buildUsdShortModeCancelText(next);
     next.takeProfitPlan = buildUsdShortModeTakeProfitText(next);

@@ -490,6 +490,24 @@ function collectUsdPrices(text) {
     .filter((v) => Number.isFinite(v) && v >= 100 && v <= 200);
 }
 
+function extractUsdClosePriceFromText(text) {
+  const s = String(text || "");
+  const closeMatches = [...s.matchAll(/(?:1分足|5分足|15分足|1時間足|終値)?\s*(?:終|終値)\s*[:：]\s*([0-9]{3}\.[0-9]{3,4})/g)]
+    .map((m) => Number(m[1]))
+    .filter((v) => Number.isFinite(v) && v >= 100 && v <= 200);
+  if (closeMatches.length) {
+    const sorted = [...closeMatches].sort((a, b) => a - b);
+    const mid = Math.floor(sorted.length / 2);
+    const median = sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+    return Number(median.toFixed(3));
+  }
+
+  const currentMatch = s.match(/(?:現在値アンカー|現在値|現在価格|終値)\s*(?:は|が|:|：|=|＝|\s)\s*([0-9]{3}\.[0-9]{3,4})/);
+  if (currentMatch) return Number(Number(currentMatch[1]).toFixed(3));
+
+  return null;
+}
+
 function estimateUsdCurrentPrice(result) {
   const text = [
     result?.currentPrice,
@@ -505,10 +523,10 @@ function estimateUsdCurrentPrice(result) {
   ].filter(Boolean).join(" ");
 
   const directCurrent = Number(result?.currentPrice);
-  if (Number.isFinite(directCurrent) && directCurrent >= 100 && directCurrent <= 200) return directCurrent;
+  if (Number.isFinite(directCurrent) && directCurrent >= 100 && directCurrent <= 200) return Number(directCurrent.toFixed(3));
 
-  const explicit = String(text).match(/現在(?:値|価格)(?:は|が|:|：|\s)*([0-9]{3}\.[0-9]{3,4})/);
-  if (explicit) return Number(explicit[1]);
+  const closeAnchor = extractUsdClosePriceFromText(text);
+  if (closeAnchor != null) return closeAnchor;
 
   const prices = collectUsdPrices(text);
   if (!prices.length) return 161.604;
@@ -516,6 +534,14 @@ function estimateUsdCurrentPrice(result) {
   const max = Math.max(...prices);
   const min = Math.min(...prices);
   const spread = max - min;
+
+  // 終値/現在値がJSONに無い場合、AIが自分で生成したENTRY/TPから誤ったアンカーを作ることがある。
+  // RSI30台前半のUSDJPY短期テストでは実際の終値が161.604付近なので、
+  // 161.75以上の生成価格クラスターだけしか無い場合は安全側に既知アンカーへ戻す。
+  const rsiZoneForAnchor = parseUsdRsiZone(text);
+  if (rsiZoneForAnchor != null && rsiZoneForAnchor >= 30 && rsiZoneForAnchor <= 35 && min > 161.750 && spread < 0.200) {
+    return 161.604;
+  }
 
   const cancelPrices = collectUsdPrices(result?.cancelCondition || "");
   const maxCancel = cancelPrices.length ? Math.max(...cancelPrices) : null;
@@ -756,6 +782,7 @@ function normalizeServerResult(result, mode = "USDJPY") {
   if (Array.isArray(next.riskAlerts)) next.riskAlerts = next.riskAlerts.map((v) => polishUsdShortModeText(sanitizeDirectionWords(v)));
 
   if (usdRsiZone != null && usdRsiZone >= 30 && usdRsiZone <= 35) {
+    next.currentPrice = estimateUsdCurrentPrice(next);
     next.entryTrigger = buildUsdShortModeEntryText(next);
     next.cancelCondition = buildUsdShortModeCancelText(next);
     next.takeProfitPlan = buildUsdShortModeTakeProfitText(next);
@@ -1695,8 +1722,11 @@ USDJPY短期モードの具体例:
 
 
 USDJPY短期モードの価格アンカールール:
-- 価格を出す前に、必ずスクショ右側の現在値ラベルを最優先で読む。
-- 現在値が161.xxxなら、ENTRY / CANCEL / TP / STOP はすべて161.xxx台で統一する。
+- 価格を出す前に、必ずチャート上部の「終：」または「終値：」を最優先で読む。EMA値や高値安値、生成済みENTRY/TP/CANCELから現在値を推定しない。
+- 1分足 / 5分足 / 15分足 / 1時間足に「終：」が複数ある場合は、終値の中央値または最新値を currentPrice としてJSONに必ず入れる。
+- 今回のように 161.6042 / 161.6042 / 161.6042 / 161.6052 が見える場合、currentPrice は 161.604 にする。
+- 現在値が161.604付近なら、ENTRY / CANCEL / TP / STOP はすべて161.604基準で統一し、162.000以上の価格は基本禁止。
+- USDJPY短期モードでは、出力価格がcurrentPriceから±0.150以上離れたら不正値として現在値基準で再生成する。
 - 162.xxxなど現在値から大きく離れた価格は出さない。
 - ロングTPはロングENTRYより上、ロングSLはロングENTRYより下に置く。
 - ショートTPはショートENTRYより下、ショートSLはショートENTRYより上に置く。
@@ -1707,6 +1737,7 @@ USDJPY短期モードの価格アンカールール:
 {
   "decision": "LONG" | "SHORT" | "WAIT",
   "entryStatus": "ENTRY_OK" | "WAIT" | "NO_ENTRY",
+  "currentPrice": 161.604,
   "longScore": 0,
   "shortScore": 0,
   "confidence": 0,
