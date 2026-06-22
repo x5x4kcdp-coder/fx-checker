@@ -147,7 +147,11 @@ function sanitizeMacdWords(text) {
     .replace(/赤の上向き/g, "上向き")
     .replace(/青の下向き/g, "下向き")
     .replace(/MACD赤/g, "MACD上向き")
-    .replace(/MACD青/g, "MACD下向き");
+    .replace(/MACD青/g, "MACD下向き")
+    .replace(/付近付近/g, "付近")
+    .replace(/RSIの数値が70を超えておらず、過熱感はまだない/g, "1分RSIは70未満で買われ過ぎではないが、直近上昇後のため現在値からの追い買いは避けたい")
+    .replace(/RSIが70未満で過熱感はまだない/g, "1分RSIは70未満で買われ過ぎではないが、直近上昇後のため現在値からの追い買いは避けたい")
+    .replace(/過熱感はまだない/g, "買われ過ぎではないが、現在値からの追い買いは避けたい");
 }
 
 function normalizeTextFields(result) {
@@ -177,6 +181,51 @@ function hasAny(text, words) {
 function clampScore(value, min, max) {
   const n = Number(value ?? 0);
   return Math.max(min, Math.min(max, n));
+}
+
+function fmtPrice(value) {
+  return Number(value).toFixed(3);
+}
+
+function extractFirstPrice(text, pattern) {
+  const match = String(text || "").match(pattern);
+  return match ? Number(match[1]) : null;
+}
+
+function estimateCurrentPriceForLong(next) {
+  const text = makeAllText(next);
+  const explicit = extractFirstPrice(text, /現在(?:値|価格)(?:は|が|:|：|\s)*([0-9]{3}\.[0-9]{3,4})/);
+  if (explicit) return explicit;
+
+  const longTp1 = extractFirstPrice(text, /ロング時[\s\S]*?TP1\s*[:：]?\s*([0-9]{3}\.[0-9]{3,4})/);
+  if (longTp1) return longTp1 - 0.005;
+
+  const tp1 = extractFirstPrice(text, /TP1\s*[:：]?\s*([0-9]{3}\.[0-9]{3,4})/);
+  if (tp1) return tp1 - 0.005;
+
+  const entryRange = String(next?.entryTrigger || next?.entryPlan || "").match(/([0-9]{3}\.[0-9]{3,4})\s*[〜~～]\s*([0-9]{3}\.[0-9]{3,4})/);
+  if (entryRange) return (Number(entryRange[1]) + Number(entryRange[2])) / 2 + 0.020;
+
+  return null;
+}
+
+function buildRsiMidLongEntry(next) {
+  const current = estimateCurrentPriceForLong(next);
+  if (!current) return null;
+
+  const firstLow = current - 0.020;
+  const firstHigh = current - 0.010;
+  const secondLow = current - 0.040;
+  const secondHigh = current - 0.020;
+  const shortLow = current + 0.005;
+  const shortHigh = current + 0.025;
+
+  return `新規成行禁止。
+ロング候補:
+第一候補は${fmtPrice(firstLow)}〜${fmtPrice(firstHigh)}付近で下げ止まり、1分RSIが50〜55まで落ち着き、陽線確定した場合。5分MACDが上向き継続し、15分MACDの上向き基調を維持していればロング検討。
+第二候補は${fmtPrice(secondLow)}〜${fmtPrice(secondHigh)}付近まで押した場合。15分足の上昇基調が崩れず、1分RSI40〜50から反発したらロング検討。
+ショート候補:
+上位足ロング背景が強いため、ショートは短期逆張り扱い。${fmtPrice(shortLow)}〜${fmtPrice(shortHigh)}付近で上値が重くなり、1分RSIが60〜70から反落。5分MACDが下向き転換し、陰線確定した場合のみ短期ショート検討。`;
 }
 
 function inferState({ direction, currentState, longScore, shortScore, confidence, rsi, allText }) {
@@ -312,6 +361,38 @@ function normalizeFxResult(aiResult, mode) {
     next.entryStatus = "WAIT";
   }
 
+  // 上位足ロング背景 + RSI55〜65 + 5分足やや鈍化では、浅めの押し目候補を優先する。
+  if (
+    mode === "USDJPY" &&
+    hasHigherLong &&
+    String(decision).includes("ロング") &&
+    rsi != null &&
+    rsi >= 55 &&
+    rsi <= 65
+  ) {
+    state = "反発確認待ち";
+    confidence = Math.min(confidence || 65, 65);
+    next.entryStatus = "WAIT";
+    const rebuiltEntry = buildRsiMidLongEntry(next);
+    if (rebuiltEntry) next.entryTrigger = rebuiltEntry;
+    next.summary = sanitizeMacdWords(
+      String(next.summary || "").replace(
+        /RSI(?:の数値)?が70(?:を)?(?:超えておらず|未満で)[^。]*過熱感[^。]*。?/g,
+        "1分RSIは70未満で買われ過ぎではないが、直近上昇後のため現在値からの追い買いは避けたい。"
+      )
+    );
+    next.reasons = Array.isArray(next.reasons)
+      ? next.reasons.map((reason) =>
+          sanitizeMacdWords(
+            String(reason).replace(
+              /RSI(?:の数値)?が70(?:を)?(?:超えておらず|未満で)[^。]*過熱感[^。]*。?/g,
+              "1分RSIは70未満で買われ過ぎではないが、直近上昇後のため現在値からの追い買いは避けたい。"
+            )
+          )
+        )
+      : next.reasons;
+  }
+
   // RSI70以上のロング優勢は押し目待ち・成行禁止。
   if (String(decision).includes("ロング") && rsi != null && rsi >= 70) {
     state = "押し目買い待ち";
@@ -373,6 +454,8 @@ function normalizeFxResult(aiResult, mode) {
         "\nRR目安: ENTRY価格とSTOP位置次第。TP1は短期利確候補。反発/反落が強い場合のみTP2以降を検討。";
     }
   }
+
+  next = normalizeTextFields(next);
 
   return {
     ...next,

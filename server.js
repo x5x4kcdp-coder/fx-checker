@@ -37,7 +37,64 @@ function sanitizeDirectionWords(text) {
     .replace(/赤継続/g, "上向き継続")
     .replace(/青継続/g, "下向き継続")
     .replace(/MACD赤/g, "MACD上向き")
-    .replace(/MACD青/g, "MACD下向き");
+    .replace(/MACD青/g, "MACD下向き")
+    .replace(/付近付近/g, "付近")
+    .replace(/RSIの数値が70を超えておらず、過熱感はまだない/g, "1分RSIは70未満で買われ過ぎではないが、直近上昇後のため現在値からの追い買いは避けたい")
+    .replace(/RSIが70未満で過熱感はまだない/g, "1分RSIは70未満で買われ過ぎではないが、直近上昇後のため現在値からの追い買いは避けたい")
+    .replace(/過熱感はまだない/g, "買われ過ぎではないが、現在値からの追い買いは避けたい");
+}
+
+
+function formatPrice(value) {
+  return Number(value).toFixed(3);
+}
+
+function pickPrice(text, pattern) {
+  const match = String(text || "").match(pattern);
+  return match ? Number(match[1]) : null;
+}
+
+function estimateCurrentPriceForLongResult(result) {
+  const text = [
+    result.decision,
+    result.summary,
+    result.risk,
+    result.entryTrigger,
+    result.entryPlan,
+    result.cancelCondition,
+    result.takeProfitPlan,
+    result.stopPlan,
+    Array.isArray(result.reasons) ? result.reasons.join(" ") : result.reasons,
+    Array.isArray(result.riskAlerts) ? result.riskAlerts.join(" ") : result.riskAlerts,
+  ].filter(Boolean).join(" ");
+
+  const explicit = pickPrice(text, /現在(?:値|価格)(?:は|が|:|：|\s)*([0-9]{3}\.[0-9]{3,4})/);
+  if (explicit) return explicit;
+
+  const longTp1 = pickPrice(text, /ロング時[\s\S]*?TP1\s*[:：]?\s*([0-9]{3}\.[0-9]{3,4})/);
+  if (longTp1) return longTp1 - 0.005;
+
+  const tp1 = pickPrice(text, /TP1\s*[:：]?\s*([0-9]{3}\.[0-9]{3,4})/);
+  if (tp1) return tp1 - 0.005;
+
+  const entryRange = String(result.entryTrigger || result.entryPlan || "").match(/([0-9]{3}\.[0-9]{3,4})\s*[〜~～]\s*([0-9]{3}\.[0-9]{3,4})/);
+  if (entryRange) return (Number(entryRange[1]) + Number(entryRange[2])) / 2 + 0.020;
+
+  return null;
+}
+
+function buildMidRsiLongEntryResult(result) {
+  const current = estimateCurrentPriceForLongResult(result);
+  if (!current) return null;
+
+  const firstLow = current - 0.020;
+  const firstHigh = current - 0.010;
+  const secondLow = current - 0.040;
+  const secondHigh = current - 0.020;
+  const shortLow = current + 0.005;
+  const shortHigh = current + 0.025;
+
+  return `新規成行禁止。ロング候補: 第一候補は${formatPrice(firstLow)}〜${formatPrice(firstHigh)}付近で下げ止まり、1分RSIが50〜55まで落ち着き、陽線確定した場合。5分MACDが上向き継続し、15分MACDの上向き基調を維持していればロング検討。第二候補は${formatPrice(secondLow)}〜${formatPrice(secondHigh)}付近まで押した場合、15分足の上昇基調が崩れず、1分RSI40〜50から反発したらロング検討。ショート候補: 上位足ロング背景が強いため、ショートは短期逆張り扱い。${formatPrice(shortLow)}〜${formatPrice(shortHigh)}付近で上値が重くなり、1分RSIが60〜70から反落、5分MACDが下向き転換し、陰線確定した場合のみ短期ショート検討。`;
 }
 
 function normalizeServerResult(result) {
@@ -69,6 +126,32 @@ function normalizeServerResult(result) {
   const rsiMatch = allText.match(/RSI(?:は|が|:|：|\s)*約?([0-9]{1,2}(?:\.[0-9]+)?)/);
   const rsi = rsiMatch ? Number(rsiMatch[1]) : null;
   const diff = Math.abs(longScore - shortScore);
+
+  const hasHigherLong = /1時間足.*?(上昇|上向き|ロング)|上位足ロング|ロング背景|15分足.*?上向き|15分足.*?上昇/.test(allText);
+
+  if (
+    hasHigherLong &&
+    String(next.decision || "").includes("ロング") &&
+    rsi != null &&
+    rsi >= 55 &&
+    rsi <= 65
+  ) {
+    next.state = "反発確認待ち";
+    next.entryStatus = "WAIT";
+    next.confidence = Math.min(confidence || 65, 65);
+    const entry = buildMidRsiLongEntryResult(next);
+    if (entry) next.entryTrigger = entry;
+    next.summary = sanitizeDirectionWords(String(next.summary || "").replace(
+      /RSI(?:の数値)?が70(?:を)?(?:超えておらず|未満で)[^。]*過熱感[^。]*。?/g,
+      "1分RSIは70未満で買われ過ぎではないが、直近上昇後のため現在値からの追い買いは避けたい。"
+    ));
+    if (Array.isArray(next.reasons)) {
+      next.reasons = next.reasons.map((reason) => sanitizeDirectionWords(String(reason).replace(
+        /RSI(?:の数値)?が70(?:を)?(?:超えておらず|未満で)[^。]*過熱感[^。]*。?/g,
+        "1分RSIは70未満で買われ過ぎではないが、直近上昇後のため現在値からの追い買いは避けたい。"
+      )));
+    }
+  }
 
   if (diff < 10) {
     next.decision = "見送り";
@@ -103,6 +186,12 @@ function normalizeServerResult(result) {
   if (next.takeProfitPlan && !next.takeProfitPlan.includes("TP1は短期利確候補")) {
     next.takeProfitPlan += "\nRR目安: ENTRY価格とSTOP位置次第。TP1は短期利確候補。反発/反落が強い場合のみTP2以降を検討。";
   }
+
+  ["summary", "risk", "entryTrigger", "entryPlan", "cancelCondition", "takeProfitPlan", "stopPlan"].forEach((key) => {
+    if (next[key]) next[key] = sanitizeDirectionWords(next[key]);
+  });
+  if (Array.isArray(next.reasons)) next.reasons = next.reasons.map(sanitizeDirectionWords);
+  if (Array.isArray(next.riskAlerts)) next.riskAlerts = next.riskAlerts.map(sanitizeDirectionWords);
 
   return next;
 }
