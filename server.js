@@ -55,6 +55,89 @@ function sanitizeDirectionWords(text) {
 }
 
 
+function sanitizeMxnSwapText(text) {
+  if (!text) return text;
+  let value = String(text);
+
+  // MXNJPYスワップモードでは1分RSI画像は無い前提。RSI数値を断定しない。
+  value = value
+    .replace(/1分(?:足)?RSI\s*(?:が|は)?\s*[0-9０-９]+(?:\.[0-9]+)?\s*(?:〜|~|～|-)\s*[0-9０-９]+(?:\.[0-9]+)?\s*(?:へ回復)?\s*(?:から)?\s*反発/g, "短期足の下げ止まり")
+    .replace(/1分(?:足)?RSI\s*(?:が|は)?\s*[0-9０-９]+(?:\.[0-9]+)?\s*(?:〜|~|～|-)\s*[0-9０-９]+(?:\.[0-9]+)?\s*(?:から)?\s*反落/g, "短期足の反落確認")
+    .replace(/1分(?:足)?RSI\s*(?:が|は)?\s*[0-9０-９]+(?:\.[0-9]+)?\s*(?:台(?:前半|後半)?|付近|以下|以上|未満|超え|割れ)?/g, "短期RSIは未確認")
+    .replace(/1分(?:足)?RSI/g, "短期RSI")
+    .replace(/RSI\s*(?:が|は)?\s*[0-9０-９]+(?:\.[0-9]+)?\s*(?:〜|~|～|-)\s*[0-9０-９]+(?:\.[0-9]+)?\s*(?:へ回復)?\s*(?:から)?\s*反発/g, "短期足の下げ止まり")
+    .replace(/RSI\s*(?:が|は)?\s*[0-9０-９]+(?:\.[0-9]+)?\s*(?:〜|~|～|-)\s*[0-9０-９]+(?:\.[0-9]+)?\s*(?:から)?\s*反落/g, "短期足の反落確認")
+    .replace(/RSI\s*(?:が|は)?\s*[0-9０-９]+(?:\.[0-9]+)?\s*(?:台(?:前半|後半)?|付近|以下|以上|未満|超え|割れ)?/g, "短期RSIは未確認");
+
+  // 5分足画像もMXNJPYモードでは前提にしない。短期足として抽象化する。
+  value = value
+    .replace(/5分足MACD/g, "短期足の動き")
+    .replace(/5分MACD/g, "短期足の動き")
+    .replace(/5分足/g, "短期足")
+    .replace(/5分/g, "短期足");
+
+  value = value
+    .replace(/短期RSIは未確認(?:へ回復し|へ回復|から反発|で反発)/g, "短期足の下げ止まり")
+    .replace(/短期RSIは未確認(?:から反落|で反落)/g, "短期足の反落確認")
+    .replace(/短期RSIは未確認で買い圧力は弱い/g, "短期RSIは未確認")
+    .replace(/短期RSIは未確認でやや弱い/g, "短期RSIは未確認")
+    .replace(/短期RSIは未確認で過熱感はなく/g, "短期RSIは未確認のため過熱感は判断せず")
+    .replace(/短期RSIは未確認のため過熱感はなく/g, "短期RSIは未確認のため過熱感は判断せず")
+    .replace(/短期RSIは未確認のため買い圧力は弱い/g, "短期RSIは未確認")
+    .replace(/短期RSIは未確認、?買い圧力は弱い/g, "短期RSIは未確認")
+    .replace(/買い圧力はある/g, "反発確認が必要")
+    .replace(/買い圧力はやや優勢/g, "反発確認が必要");
+
+  // MXNJPYでUSDJPY由来の161.xxx価格が出た場合は無効化する。
+  value = value
+    .replace(/\b1\d{2}\.\d{2,4}\s*[〜~～]\s*1\d{2}\.\d{2,4}\b/g, "現在値付近")
+    .replace(/\b1\d{2}\.\d{2,4}\b/g, "現在値付近");
+
+  return value
+    .replace(/短期RSIは未確認は/g, "短期RSIは")
+    .replace(/短期RSIは未確認が/g, "短期RSIは未確認で")
+    .replace(/付近付近/g, "付近");
+}
+
+function normalizeMxnSwapResult(result) {
+  const next = { ...result };
+  ["summary", "risk", "entryTrigger", "entryPlan", "cancelCondition", "takeProfitPlan", "stopPlan"].forEach((key) => {
+    if (next[key]) next[key] = sanitizeMxnSwapText(sanitizeDirectionWords(next[key]));
+  });
+  if (Array.isArray(next.reasons)) next.reasons = next.reasons.map((v) => sanitizeMxnSwapText(sanitizeDirectionWords(v)));
+  if (Array.isArray(next.riskAlerts)) next.riskAlerts = next.riskAlerts.map((v) => sanitizeMxnSwapText(sanitizeDirectionWords(v)));
+
+  const longScore = Number(next.longScore ?? 0);
+  const shortScore = Number(next.shortScore ?? 0);
+  next.decision = String(next.decision || "").includes("ショート") ? "見送り" : (next.decision || "ロング優勢");
+  next.state = next.state && next.state !== "待ち" ? next.state : "反発確認待ち";
+  next.entryStatus = "WAIT";
+  next.confidence = Math.min(Number(next.confidence ?? 60), 60);
+  if (longScore >= shortScore) next.longScore = Math.min(Math.max(longScore || 70, 65), 75);
+  next.shortScore = Math.min(shortScore || 45, 55);
+
+  const rsiRisk = "短期RSIは未確認のため、反発確認前の成行ロングは禁止";
+  const alerts = Array.isArray(next.riskAlerts) ? next.riskAlerts : next.risk ? [next.risk] : [];
+  next.riskAlerts = [...new Set([rsiRisk, ...alerts.map((v) => sanitizeMxnSwapText(v)).filter(Boolean)])].slice(0, 5);
+  next.risk = next.riskAlerts.join("\n");
+
+  if (!next.summary || /短期RSIは未確認/.test(next.summary) === false) {
+    next.summary = sanitizeMxnSwapText(`${next.summary || ""} 短期RSIは未確認のため断定せず、短期足の下げ止まり・陽線確定・EMA帯回復を待つ場面。`).trim();
+  }
+
+  if (next.entryTrigger) {
+    next.entryTrigger = sanitizeMxnSwapText(next.entryTrigger)
+      .replace(/短期足の下げ止まり\s*、?\s*陽線確定/g, "短期足の下げ止まり、陽線確定")
+      .replace(/短期足の下げ止まりを確認/g, "短期足の下げ止まりを確認");
+  } else {
+    next.entryTrigger = "新規成行禁止。ロング候補は現在値付近の浅い押し目で、短期足の下げ止まり、陽線確定、またはEMA帯回復を確認。そのうえで15分足MACDが下向きから鈍化、または上向き転換気味となるなら検討。";
+  }
+
+  if (next.takeProfitPlan) next.takeProfitPlan = normalizeTakeProfitText(sanitizeMxnSwapText(next.takeProfitPlan));
+  return next;
+}
+
+
 function formatPrice(value) {
   return Number(value).toFixed(3);
 }
@@ -148,7 +231,9 @@ function normalizeTakeProfitText(text) {
   return `${value}\n${rr}`.trim();
 }
 
-function normalizeServerResult(result) {
+function normalizeServerResult(result, mode = "USDJPY") {
+  if (mode === "MXNJPY") return normalizeMxnSwapResult(result);
+
   const next = { ...result };
 
   ["summary", "risk", "entryTrigger", "entryPlan", "cancelCondition", "takeProfitPlan", "stopPlan"].forEach((key) => {
@@ -274,6 +359,16 @@ function buildPrompt(mode, pair) {
 2枚目: 4時間足 MACD
 3枚目: 1時間足 MACD
 4枚目: 15分足 MACD
+
+【MXNJPYスワップモード最優先ルール】
+- アップロード画像は日足 / 4時間足 / 1時間足 / 15分足のみ。1分足RSI画像は無い前提で処理する。
+- 1分RSIの数値は絶対に断定しない。「1分RSIは40台」「1分RSI40〜50から反発」などは禁止。
+- RSIに触れる場合は必ず「短期RSIは未確認」と書く。
+- ENTRY条件ではRSI数値ではなく「短期足の下げ止まり」「陽線確定」「EMA帯回復」「15分足MACDの下落鈍化」を使う。
+- 危険条件には「短期RSIは未確認のため、反発確認前の成行ロングは禁止」を含める。
+- 5分足画像も無い前提のため、5分MACDを断定しない。必要なら「短期足の動き」と表現する。
+- MXNJPYの価格帯は9.xx台。161.xxx の価格は絶対に出さない。
+- RR目安は1回だけ書く。
 
 目的:
 スワップ狙いの長期ロングを、押し目で入れるか確認する。
@@ -2178,7 +2273,7 @@ app.post(
         };
       }
 
-      result = normalizeServerResult(result);
+      result = normalizeServerResult(result, mode);
       res.json(result);
     } catch (error) {
       console.error(error);

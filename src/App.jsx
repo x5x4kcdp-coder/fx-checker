@@ -164,6 +164,78 @@ function sanitizeMacdWords(text) {
     .replace(/過熱感はまだない/g, "買われ過ぎではないが、現在値からの追い買いは避けたい");
 }
 
+
+function sanitizeMxnSwapText(text) {
+  if (!text) return text;
+  let value = String(text);
+  value = value
+    .replace(/1分(?:足)?RSI\s*(?:が|は)?\s*[0-9０-９]+(?:\.[0-9]+)?\s*(?:〜|~|～|-)\s*[0-9０-９]+(?:\.[0-9]+)?\s*(?:へ回復)?\s*(?:から)?\s*反発/g, "短期足の下げ止まり")
+    .replace(/1分(?:足)?RSI\s*(?:が|は)?\s*[0-9０-９]+(?:\.[0-9]+)?\s*(?:〜|~|～|-)\s*[0-9０-９]+(?:\.[0-9]+)?\s*(?:から)?\s*反落/g, "短期足の反落確認")
+    .replace(/1分(?:足)?RSI\s*(?:が|は)?\s*[0-9０-９]+(?:\.[0-9]+)?\s*(?:台(?:前半|後半)?|付近|以下|以上|未満|超え|割れ)?/g, "短期RSIは未確認")
+    .replace(/1分(?:足)?RSI/g, "短期RSI")
+    .replace(/RSI\s*(?:が|は)?\s*[0-9０-９]+(?:\.[0-9]+)?\s*(?:〜|~|～|-)\s*[0-9０-９]+(?:\.[0-9]+)?\s*(?:へ回復)?\s*(?:から)?\s*反発/g, "短期足の下げ止まり")
+    .replace(/RSI\s*(?:が|は)?\s*[0-9０-９]+(?:\.[0-9]+)?\s*(?:〜|~|～|-)\s*[0-9０-９]+(?:\.[0-9]+)?\s*(?:から)?\s*反落/g, "短期足の反落確認")
+    .replace(/RSI\s*(?:が|は)?\s*[0-9０-９]+(?:\.[0-9]+)?\s*(?:台(?:前半|後半)?|付近|以下|以上|未満|超え|割れ)?/g, "短期RSIは未確認")
+    .replace(/5分足MACD/g, "短期足の動き")
+    .replace(/5分MACD/g, "短期足の動き")
+    .replace(/5分足/g, "短期足")
+    .replace(/5分/g, "短期足")
+    .replace(/短期RSIは未確認(?:へ回復し|へ回復|から反発|で反発)/g, "短期足の下げ止まり")
+    .replace(/短期RSIは未確認(?:から反落|で反落)/g, "短期足の反落確認")
+    .replace(/短期RSIは未確認で買い圧力は弱い/g, "短期RSIは未確認")
+    .replace(/短期RSIは未確認でやや弱い/g, "短期RSIは未確認")
+    .replace(/短期RSIは未確認で過熱感はなく/g, "短期RSIは未確認のため過熱感は判断せず")
+    .replace(/短期RSIは未確認のため過熱感はなく/g, "短期RSIは未確認のため過熱感は判断せず")
+    .replace(/短期RSIは未確認のため買い圧力は弱い/g, "短期RSIは未確認")
+    .replace(/短期RSIは未確認、?買い圧力は弱い/g, "短期RSIは未確認")
+    .replace(/買い圧力はある/g, "反発確認が必要")
+    .replace(/買い圧力はやや優勢/g, "反発確認が必要")
+    .replace(/\b1\d{2}\.\d{2,4}\s*[〜~～]\s*1\d{2}\.\d{2,4}\b/g, "現在値付近")
+    .replace(/\b1\d{2}\.\d{2,4}\b/g, "現在値付近")
+    .replace(/短期RSIは未確認は/g, "短期RSIは")
+    .replace(/短期RSIは未確認が/g, "短期RSIは未確認で")
+    .replace(/付近付近/g, "付近");
+  return value;
+}
+
+function normalizeMxnSwapResult(aiResult) {
+  if (!aiResult) return null;
+  let next = { ...aiResult };
+  ["summary", "risk", "entryTrigger", "entryPlan", "cancelCondition", "takeProfitPlan", "stopPlan"].forEach((key) => {
+    if (next[key]) next[key] = sanitizeMxnSwapText(sanitizeMacdWords(next[key]));
+  });
+  if (Array.isArray(next.reasons)) next.reasons = next.reasons.map((v) => sanitizeMxnSwapText(sanitizeMacdWords(v)));
+  if (Array.isArray(next.riskAlerts)) next.riskAlerts = next.riskAlerts.map((v) => sanitizeMxnSwapText(sanitizeMacdWords(v)));
+
+  const longScore = Number(next.longScore ?? 0);
+  const shortScore = Number(next.shortScore ?? 0);
+  next.decision = String(next.decision || "").includes("ショート") ? "見送り" : (next.decision || "ロング優勢");
+  next.state = next.state && next.state !== "待ち" ? next.state : "反発確認待ち";
+  next.entryStatus = "WAIT";
+  next.confidence = Math.min(Number(next.confidence ?? 60), 60);
+  if (longScore >= shortScore) next.longScore = Math.min(Math.max(longScore || 70, 65), 75);
+  next.shortScore = Math.min(shortScore || 45, 55);
+
+  const rsiRisk = "短期RSIは未確認のため、反発確認前の成行ロングは禁止";
+  const alerts = Array.isArray(next.riskAlerts) ? next.riskAlerts : next.risk ? [next.risk] : [];
+  next.riskAlerts = [...new Set([rsiRisk, ...alerts.map((v) => sanitizeMxnSwapText(v)).filter(Boolean)])].slice(0, 5);
+  next.risk = next.riskAlerts.join("\n");
+
+  if (!next.summary || !String(next.summary).includes("短期RSIは未確認")) {
+    next.summary = sanitizeMxnSwapText(`${next.summary || ""} 短期RSIは未確認のため断定せず、短期足の下げ止まり・陽線確定・EMA帯回復を待つ場面。`).trim();
+  }
+
+  if (next.entryTrigger) {
+    next.entryTrigger = sanitizeMxnSwapText(next.entryTrigger)
+      .replace(/短期足の下げ止まり\s*、?\s*陽線確定/g, "短期足の下げ止まり、陽線確定");
+  } else {
+    next.entryTrigger = "新規成行禁止。ロング候補は現在値付近の浅い押し目で、短期足の下げ止まり、陽線確定、またはEMA帯回復を確認。そのうえで15分足MACDが下向きから鈍化、または上向き転換気味となるなら検討。";
+  }
+
+  if (next.takeProfitPlan) next.takeProfitPlan = normalizeTakeProfitText(sanitizeMxnSwapText(next.takeProfitPlan));
+  return next;
+}
+
 function normalizeTextFields(result) {
   const next = { ...result };
   [
@@ -305,6 +377,7 @@ function inferState({ direction, currentState, longScore, shortScore, confidence
 
 function normalizeFxResult(aiResult, mode) {
   if (!aiResult) return null;
+  if (mode === "MXNJPY") return normalizeMxnSwapResult(aiResult);
 
   let next = normalizeTextFields({ ...aiResult });
   const allText = makeAllText(next);
@@ -529,12 +602,12 @@ function normalizeFxResult(aiResult, mode) {
 
 
 function extractPriceRanges(text, limit = 3) {
-  const matches = String(text || "").match(/[0-9]{3}\.[0-9]{3,4}\s*[〜~～]\s*[0-9]{3}\.[0-9]{3,4}/g) || [];
+  const matches = String(text || "").match(/[0-9]{1,3}\.[0-9]{2,4}\s*[〜~～]\s*[0-9]{1,3}\.[0-9]{2,4}/g) || [];
   return [...new Set(matches.map((v) => v.replace(/[~～]/g, "〜")))].slice(0, limit);
 }
 
 function extractSinglePrices(text, limit = 3) {
-  const matches = String(text || "").match(/[0-9]{3}\.[0-9]{3,4}/g) || [];
+  const matches = String(text || "").match(/[0-9]{1,3}\.[0-9]{2,4}/g) || [];
   return [...new Set(matches)].slice(0, limit);
 }
 
