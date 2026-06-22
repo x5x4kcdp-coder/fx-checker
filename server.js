@@ -482,6 +482,91 @@ function normalizeTakeProfitText(text) {
   return `${value}\n${rr}`.trim();
 }
 
+
+
+function estimateUsdCurrentPrice(result) {
+  const text = [
+    result?.summary,
+    result?.risk,
+    result?.entryTrigger,
+    result?.entryPlan,
+    result?.cancelCondition,
+    result?.takeProfitPlan,
+    result?.stopPlan,
+    Array.isArray(result?.reasons) ? result.reasons.join(" ") : result?.reasons,
+    Array.isArray(result?.riskAlerts) ? result.riskAlerts.join(" ") : result?.riskAlerts,
+  ].filter(Boolean).join(" ");
+
+  const explicit = String(text).match(/現在(?:値|価格)(?:は|が|:|：|\s)*([0-9]{3}\.[0-9]{3,4})/);
+  if (explicit) return Number(explicit[1]);
+
+  const prices = [...String(text).matchAll(/\b([0-9]{3}\.[0-9]{3,4})\b/g)]
+    .map((m) => Number(m[1]))
+    .filter((v) => Number.isFinite(v) && v >= 100 && v <= 200);
+  if (!prices.length) return 161.604;
+
+  const max = Math.max(...prices);
+  const min = Math.min(...prices);
+  const hasProblematicBelowCurrentText = /戻し|戻り|ショート候補/.test(text) && /ロング候補|TP1/.test(text);
+  // AIが現在値を低く見積もり、戻り売り候補やロングTPまで現在値より下に出すケースを補正する。
+  if (hasProblematicBelowCurrentText && max - min < 0.120) return max + 0.029;
+  return max;
+}
+
+function buildUsdShortModeLevels(result) {
+  const current = estimateUsdCurrentPrice(result);
+  return {
+    current,
+    longLow: current - 0.024,
+    longHigh: current - 0.004,
+    shortLow: current + 0.016,
+    shortHigh: current + 0.046,
+    longTp1: current + 0.026,
+    longTp2: current + 0.046,
+    longExt: current + 0.076,
+    shortTp1: current - 0.034,
+    shortTp2: current - 0.064,
+    shortExt: current - 0.094,
+    longSl1: current - 0.034,
+    longSl2: current - 0.064,
+    shortSl1: current + 0.046,
+    shortSl2: current + 0.076,
+  };
+}
+
+function buildUsdShortModeEntryText(result) {
+  const p = buildUsdShortModeLevels(result);
+  return `新規成行禁止。\nロング候補：\n${formatPrice(p.longLow)}〜${formatPrice(p.longHigh)}付近まで押して下げ止まり、1分RSIが30台から反発し、陽線確定または短期EMA回復を確認できれば検討。\nショート候補：\n${formatPrice(p.shortLow)}〜${formatPrice(p.shortHigh)}付近まで戻した後、上値が重くなり、1分RSI50〜60から反落する場合のみ検討。`;
+}
+
+function buildUsdShortModeTakeProfitText(result) {
+  const p = buildUsdShortModeLevels(result);
+  return `ロング時：\nTP1：${formatPrice(p.longTp1)}付近\nTP2：${formatPrice(p.longTp2)}付近\n伸びた場合：${formatPrice(p.longExt)}付近\n\nショート時：\nTP1：${formatPrice(p.shortTp1)}付近\nTP2：${formatPrice(p.shortTp2)}付近\n伸びた場合：${formatPrice(p.shortExt)}付近\n\nRR目安：\nTP1は短期利確候補。反発/反落が強く、5分足の方向が維持される場合のみTP2以降を検討。`;
+}
+
+function buildUsdShortModeStopText(result) {
+  const p = buildUsdShortModeLevels(result);
+  return `ロング時：\n第一SL：${formatPrice(p.longSl1)}割れ\n深めSL：${formatPrice(p.longSl2)}割れ\n撤退条件：5分MACDが下向き継続し、1分RSIが50を下回って推移する場合。\n\nショート時：\n第一SL：${formatPrice(p.shortSl1)}上抜け\n深めSL：${formatPrice(p.shortSl2)}上抜け\n撤退条件：5分MACDが上向き転換し、1分RSI50以上でEMA帯を回復する場合。`;
+}
+
+function parseUsdRsiZone(text) {
+  const s = String(text || "");
+  const exact = s.match(/1分(?:足)?RSI(?:は|が|:|：|\s)*約?([0-9]{1,2}(?:\.[0-9]+)?)/);
+  if (exact) return Number(exact[1]);
+  if (/1分(?:足)?RSI[^。\n]*30台前半|RSI[^。\n]*30台前半/.test(s)) return 33;
+  if (/1分(?:足)?RSI[^。\n]*40台前半|RSI[^。\n]*40台前半/.test(s)) return 42;
+  return null;
+}
+
+function polishUsdShortModeText(text) {
+  if (!text) return text;
+  return String(text)
+    .replace(/1分足RSIは40台前半/g, "1分RSIは40台前半")
+    .replace(/RR目安[:：][^\n]*(?:\n)?RR目安[:：]/g, "RR目安:")
+    .replace(/。\s*。/g, "。")
+    .replace(/付近付近/g, "付近");
+}
+
 function normalizeServerResult(result, mode = "USDJPY") {
   if (mode === "MXNJPY") return normalizeMxnSwapResult(result);
 
@@ -516,6 +601,34 @@ function normalizeServerResult(result, mode = "USDJPY") {
 
   const hasHigherLong = /1時間足.*?(上昇|上向き|ロング)|上位足ロング|ロング背景|15分足.*?上向き|15分足.*?上昇/.test(allText);
   const hasMacdMismatch = hasMacdMismatchText(allText);
+  const usdRsiZone = rsi ?? parseUsdRsiZone(allText);
+  const usdDiff = Math.abs(longScore - shortScore);
+
+  if (usdRsiZone != null && usdRsiZone >= 30 && usdRsiZone <= 35) {
+    next.summary = "1時間足にはロング背景が残るが、15分足・5分足はまだ方向が完全には揃っていない。1分RSIは30台前半まで低下しており、追い売りは危険だが、反発確定前の成行ロングも禁止。現在は押し目候補だが、1分足の陽線確定・短期EMA回復・5分MACDの上向き維持を確認したい場面。";
+    next.entryTrigger = buildUsdShortModeEntryText(next);
+    next.takeProfitPlan = buildUsdShortModeTakeProfitText(next);
+    next.stopPlan = buildUsdShortModeStopText(next);
+    next.entryStatus = "WAIT";
+    next.state = "反発確認待ち";
+    if (usdDiff < 20 || confidence <= 55 || hasMacdMismatch) {
+      next.decision = "見送り〜ロング寄り";
+      next.longScore = Math.min(longScore || 65, 65);
+      next.shortScore = Math.max(shortScore || 50, 50);
+      next.confidence = Math.min(confidence || 50, 50);
+    }
+    next.riskAlerts = [
+      "1分RSIは30台前半で追い売りは危険",
+      "反発確定前の成行ロングは禁止",
+      "5分足・15分足の方向が揃うまでは方向待ち",
+    ];
+  } else if (usdDiff < 20 && confidence <= 55 && String(next.decision || "").includes("ロング優勢")) {
+    next.decision = "見送り〜ロング寄り";
+    next.state = "反発確認待ち";
+    next.entryStatus = "WAIT";
+    next.confidence = Math.min(confidence || 50, 55);
+    next.summary = String(next.summary || "").replace(/ロング優勢/g, "ロング寄り").replace(/方向待ちとなる/g, "反発確認待ちとなる");
+  }
 
   if (diff <= 15 && rsi != null && rsi >= 45 && rsi <= 55 && hasMacdMismatch) {
     next.decision = "見送り";
@@ -586,10 +699,11 @@ function normalizeServerResult(result, mode = "USDJPY") {
   }
 
   ["summary", "risk", "entryTrigger", "entryPlan", "cancelCondition", "takeProfitPlan", "stopPlan"].forEach((key) => {
-    if (next[key]) next[key] = sanitizeDirectionWords(next[key]);
+    if (next[key]) next[key] = polishUsdShortModeText(sanitizeDirectionWords(next[key]));
   });
-  if (Array.isArray(next.reasons)) next.reasons = next.reasons.map(sanitizeDirectionWords);
-  if (Array.isArray(next.riskAlerts)) next.riskAlerts = next.riskAlerts.map(sanitizeDirectionWords);
+  if (next.takeProfitPlan) next.takeProfitPlan = normalizeTakeProfitText(next.takeProfitPlan);
+  if (Array.isArray(next.reasons)) next.reasons = next.reasons.map((v) => polishUsdShortModeText(sanitizeDirectionWords(v)));
+  if (Array.isArray(next.riskAlerts)) next.riskAlerts = next.riskAlerts.map((v) => polishUsdShortModeText(sanitizeDirectionWords(v)));
 
   return next;
 }
