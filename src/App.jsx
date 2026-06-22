@@ -400,34 +400,48 @@ if (result) {
   const hasHigherLong =
     allText.includes("1時間足は上昇") ||
     allText.includes("1時間足は上向き") ||
-    allText.includes("上昇基調") ||
-    allText.includes("ロング背景");
+    allText.includes("1時間足MACD") && allText.includes("上昇基調") ||
+    allText.includes("上位足ロング") ||
+    allText.includes("ロング背景") ||
+    allText.includes("上昇基調を維持");
 
   const hasRsi30s =
     allText.includes("RSI33") ||
-    allText.includes("RSIが33") ||
     allText.includes("RSIは33") ||
+    allText.includes("RSIが33") ||
+    allText.includes("RSI 33") ||
     allText.includes("RSI34") ||
-    allText.includes("RSIが34") ||
     allText.includes("RSIは34") ||
-    allText.includes("RSIが30台") ||
+    allText.includes("RSIが34") ||
     allText.includes("RSI30台") ||
-    allText.includes("30台");
+    allText.includes("RSIが30〜40") ||
+    allText.includes("RSIが30") ||
+    allText.includes("30〜40") ||
+    allText.includes("売られ過ぎ手前");
 
   const hasNoChaseShort =
     allText.includes("追い売り禁止") ||
     allText.includes("追い売りは危険") ||
+    allText.includes("追い売りは避け") ||
+    allText.includes("追い売りは高リスク") ||
     allText.includes("安値掴み") ||
-    allText.includes("売られ過ぎ手前");
+    allText.includes("直近大きく下落");
 
   const isShortTooStrong =
     String(result.decision || "").includes("ショート") ||
     String(result.statusText || "").includes("戻り売り") ||
+    String(result.state || "").includes("戻り売り") ||
+    String(result.entryStatus || "").includes("戻り売り") ||
     shortScore > longScore;
 
   if (hasHigherLong && hasRsi30s && hasNoChaseShort && isShortTooStrong) {
     result.decision = "ロング優勢";
+
+    // 状態表示に使われる可能性がある項目を全部補正
     result.statusText = "反発確認待ち";
+    result.state = "反発確認待ち";
+    result.entryStatus = "WAIT";
+
     result.longScore = Math.max(longScore, 65);
     result.shortScore = Math.min(shortScore, 45);
     result.confidence = Math.min(confidence || 65, 65);
@@ -441,6 +455,12 @@ if (result) {
       "反発確認前の成行ロングも危険",
       "重要ラインを明確に割るとロング背景が弱くなる",
     ];
+
+    result.entryTrigger =
+      "新規成行禁止。ロング候補: 161.520〜161.540付近で下げ止まり、1分RSIが40〜50へ回復。そのうえで1分足陽線確定、5分足がEMA帯を維持するならロング検討。深押し候補: 161.500〜161.520付近まで押しても15分足の上昇基調が崩れず、1分RSI30〜40から反発するならロング候補。ショート候補: 161.500を明確に割り込み、5分MACDが下向き転換し、15分足も失速する場合のみ短期ショート検討。";
+
+    result.cancelCondition =
+      "ロング候補取消: 161.500を明確に割り込み、さらに161.480を下抜ける場合。または5分足がEMA帯を回復できず、1分RSIが40未満で推移する場合。ショート転換条件: 161.500割れ後、戻りでEMA帯を回復できず、5分・15分がともに下向きへ転換する場合。";
   }
 }
   const chatCopyText = useMemo(() => {
