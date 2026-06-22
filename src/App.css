@@ -1,4 +1,4 @@
-﻿* {
+* {
   box-sizing: border-box;
 }
 
@@ -717,5 +717,188 @@ footer {
 
   .marketOrderCard h2 {
     font-size: 25px;
+  }
+}
+
+/* UI v6: スマホ表示の密度調整（上部カード圧縮） */
+.quickDecisionGrid {
+  gap: 10px;
+  margin: 0 0 12px;
+}
+
+.quickCard {
+  border-radius: 16px;
+  padding: 12px 14px;
+}
+
+.quickLabel {
+  margin-bottom: 5px;
+  font-size: 11px;
+  letter-spacing: 0.1em;
+}
+
+.quickCard p {
+  font-size: 15px;
+  line-height: 1.45;
+}
+
+.nowActionCard p {
+  font-size: 16px;
+  line-height: 1.45;
+}
+
+.marketOrderCard {
+  padding: 12px 14px;
+}
+
+.marketOrderCard h2 {
+  margin: 0 0 5px;
+  font-size: 23px;
+  line-height: 1.2;
+}
+
+.marketOrderCard p {
+  font-size: 14px;
+  line-height: 1.45;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.skipReasonCard ul {
+  padding-left: 18px;
+}
+
+.skipReasonCard li {
+  font-size: 14px;
+  line-height: 1.4;
+  margin-bottom: 4px;
+}
+
+.result {
+  gap: 14px;
+  border-radius: 18px;
+  padding: 16px;
+  margin-bottom: 14px;
+}
+
+.result h2 {
+  margin: 3px 0 6px;
+  font-size: 32px;
+  line-height: 1.15;
+}
+
+.resultMain p {
+  margin: 0;
+  font-size: 15px;
+  line-height: 1.45;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.statusBox {
+  padding: 14px 10px;
+  border-radius: 14px;
+}
+
+.status {
+  font-size: 17px;
+}
+
+.statusText {
+  margin-top: 4px;
+  font-size: 16px;
+}
+
+.scoreBox {
+  gap: 8px;
+}
+
+.score {
+  padding: 10px;
+  border-radius: 10px;
+}
+
+.entrySummaryCards {
+  gap: 10px;
+}
+
+.entrySummaryCard {
+  padding: 13px;
+  border-radius: 16px;
+}
+
+.entrySummaryCard h3 {
+  margin-bottom: 9px;
+  font-size: 16px;
+}
+
+.entrySummaryCard dl {
+  gap: 6px;
+}
+
+.entrySummaryCard dd {
+  line-height: 1.35;
+}
+
+@media (max-width: 900px) {
+  .app {
+    padding: 16px;
+  }
+
+  .quickDecisionGrid {
+    gap: 10px;
+    margin-bottom: 12px;
+  }
+
+  .quickCard,
+  .entrySummaryCard,
+  .planCard {
+    padding: 12px 14px;
+  }
+
+  .quickCard p,
+  .nowActionCard p {
+    font-size: 15px;
+    line-height: 1.45;
+  }
+
+  .marketOrderCard h2 {
+    font-size: 22px;
+  }
+
+  .marketOrderCard p {
+    font-size: 13.5px;
+    line-height: 1.45;
+    -webkit-line-clamp: 2;
+  }
+
+  .result {
+    padding: 15px;
+    gap: 12px;
+  }
+
+  .result h2 {
+    font-size: 30px;
+  }
+
+  .resultMain p {
+    font-size: 14.5px;
+    -webkit-line-clamp: 3;
+  }
+
+  .statusBox {
+    padding: 12px 10px;
+  }
+
+  .score {
+    padding: 9px 10px;
+  }
+
+  .entrySummaryCard h3 {
+    font-size: 16px;
   }
 }
