@@ -543,7 +543,6 @@ function normalizeTakeProfitText(text) {
     .replace(/RR目安は[^。\n]*。?/g, "")
     .replace(/TP1が近すぎる場合は[^。]*。?/g, "")
     .replace(/TP2まで狙える形が望ましい。?/g, "")
-    .replace(/TP1は短期利確候補。反発\/反落が強く、5分足の方向が維持される場合のみTP2以降を検討。?/g, "")
     .trim();
 
   const rr = "RR目安: TP1は短期利確候補。反発/反落が強く、5分足の方向が維持される場合のみTP2以降を検討。";
@@ -2859,7 +2858,6 @@ const PORT = process.env.PORT || 8787;
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`AI server running: http://0.0.0.0:${PORT}`);
 });
-
 
 
 
