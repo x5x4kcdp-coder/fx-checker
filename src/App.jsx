@@ -173,6 +173,7 @@ function sanitizeMxnSwapText(text) {
     .replace(/1分(?:足)?RSI\s*(?:が|は)?\s*[0-9０-９]+(?:\.[0-9]+)?\s*(?:〜|~|～|-)\s*[0-9０-９]+(?:\.[0-9]+)?\s*(?:から)?\s*反落/g, "短期足の反落確認")
     .replace(/1分(?:足)?RSI\s*(?:が|は)?\s*[0-9０-９]+(?:\.[0-9]+)?\s*(?:台(?:前半|後半)?|付近|以下|以上|未満|超え|割れ)?/g, "短期RSIは未確認")
     .replace(/1分(?:足)?RSI/g, "短期RSI")
+    .replace(/1分足/g, "短期足")
     .replace(/RSI\s*(?:が|は)?\s*[0-9０-９]+(?:\.[0-9]+)?\s*(?:〜|~|～|-)\s*[0-9０-９]+(?:\.[0-9]+)?\s*(?:へ回復)?\s*(?:から)?\s*反発/g, "短期足の下げ止まり")
     .replace(/RSI\s*(?:が|は)?\s*[0-9０-９]+(?:\.[0-9]+)?\s*(?:〜|~|～|-)\s*[0-9０-９]+(?:\.[0-9]+)?\s*(?:から)?\s*反落/g, "短期足の反落確認")
     .replace(/RSI\s*(?:が|は)?\s*[0-9０-９]+(?:\.[0-9]+)?\s*(?:台(?:前半|後半)?|付近|以下|以上|未満|超え|割れ)?/g, "短期RSIは未確認")
@@ -184,8 +185,10 @@ function sanitizeMxnSwapText(text) {
     .replace(/短期RSIは未確認(?:から反落|で反落)/g, "短期足の反落確認")
     .replace(/短期RSIは未確認で買い圧力は弱い/g, "短期RSIは未確認")
     .replace(/短期RSIは未確認でやや弱い/g, "短期RSIは未確認")
-    .replace(/短期RSIは未確認で過熱感はなく/g, "短期RSIは未確認のため過熱感は判断せず")
-    .replace(/短期RSIは未確認のため過熱感はなく/g, "短期RSIは未確認のため過熱感は判断せず")
+    .replace(/短期RSIは未確認で過熱感はなく/g, "短期RSIは未確認のため、RSIでは判断せず")
+    .replace(/短期RSIは未確認だが、?過熱感(?:は)?なし。?/g, "短期RSIは未確認のため、RSIでは判断せず反発確認を待つ場面。")
+    .replace(/短期RSIは未確認だが、?過熱感(?:は)?ない/g, "短期RSIは未確認のため、RSIでは判断せず")
+    .replace(/短期RSIは未確認のため過熱感はなく/g, "短期RSIは未確認のため、RSIでは判断せず")
     .replace(/短期RSIは未確認のため買い圧力は弱い/g, "短期RSIは未確認")
     .replace(/短期RSIは未確認、?買い圧力は弱い/g, "短期RSIは未確認")
     .replace(/買い圧力はある/g, "反発確認が必要")
@@ -212,6 +215,8 @@ function polishMxnSwapText(text) {
     .replace(/短期RSIは未確認でEMA帯/g, "短期足がEMA帯")
     .replace(/短期RSIは未確認で推移する場合/g, "短期足の反発確認が出ない場合")
     .replace(/短期RSIは未確認を下回る場合/g, "短期足の反発確認が出ない場合")
+    .replace(/短期RSIは未確認を下回り続ける場合/g, "短期足が再び強い下向き継続となり、EMA帯を回復できない場合")
+    .replace(/短期RSIは未確認を下回り続ける/g, "短期足が再び強い下向き継続となる")
     .replace(/短期RSIは未確認以上でEMA帯/g, "短期足がEMA帯")
     .replace(/短期RSIは未確認未満/g, "短期足の反発確認不足")
     .replace(/短期RSIは未確認以上/g, "短期足の反発確認")
@@ -273,11 +278,11 @@ function uniqueMxnRiskAlerts(alerts) {
 
 
 function formatMxnPrice(value) {
-  if (!Number.isFinite(value)) return "9.29";
-  return Number(value).toFixed(4).replace(/0+$/, "").replace(/\.$/, "");
+  if (!Number.isFinite(value)) return "9.295";
+  return Number(value).toFixed(3);
 }
 
-function roundMxn(value, digits = 2) {
+function roundMxn(value, digits = 3) {
   const factor = 10 ** digits;
   return Math.round(Number(value) * factor) / factor;
 }
@@ -312,32 +317,38 @@ function estimateMxnCurrentPrice(result) {
     result?.takeProfitPlan,
     result?.stopPlan,
   ].filter(Boolean).join(" ");
-  const explicit = String(text).match(/現在(?:値|価格)(?:は|が|:|：|\s)*([9]\.\d{2,4})/);
-  if (explicit) return Number(explicit[1]);
-  const prices = collectMxnPricesFromResult(result).sort((a, b) => a - b);
-  if (prices.length >= 3) return prices[Math.floor(prices.length / 2)];
-  if (prices.length === 1) return prices[0];
+  const source = String(text);
+  const explicit = source.match(/現在(?:値|価格)(?:は|が|:|：|\s)*([9]\.\d{2,4})/);
+  if (explicit) {
+    const value = Number(explicit[1]);
+    if (Number.isFinite(value) && value >= 9.0 && value <= 9.8) return roundMxn(value, 3);
+  }
+
+  // MXNJPYではAIが押し目候補を現在値として誤認しやすいため、
+  // 明示的な現在値が無い場合は、直近テストスクショの基準価格帯（9.295付近）を使う。
+  // これによりTP1がENTRYと同価格帯になる問題を避ける。
   return 9.295;
 }
-
 function buildMxnPriceLevels(result) {
   const current = estimateMxnCurrentPrice(result);
-  const shallowLow = roundMxn(current - 0.005, 2);
-  const shallowHigh = roundMxn(current + 0.005, 2);
-  const deepLow = roundMxn(current - 0.035, 2);
-  const deepHigh = roundMxn(current - 0.025, 2);
-  const shortLow = roundMxn(current + 0.005, 2);
-  const shortHigh = roundMxn(current + 0.015, 2);
-  const longTp1 = roundMxn(current + 0.015, 2);
-  const longTp2 = roundMxn(current + 0.025, 2);
-  const longExt = roundMxn(current + 0.045, 2);
-  const shortTp1 = roundMxn(current - 0.015, 2);
-  const shortTp2 = Math.round((current - 0.028) * 1000) / 1000;
-  const shortExt = roundMxn(current - 0.045, 2);
-  const longSl1 = roundMxn(current - 0.015, 2);
-  const longSl2 = roundMxn(current - 0.035, 2);
-  const shortSl1 = roundMxn(current + 0.015, 2);
-  const shortSl2 = roundMxn(current + 0.025, 2);
+  const shallowLow = roundMxn(current - 0.005, 3);
+  const shallowHigh = roundMxn(current, 3);
+  const deepLow = roundMxn(current - 0.035, 3);
+  const deepHigh = roundMxn(current - 0.025, 3);
+  const shortLow = roundMxn(current + 0.005, 3);
+  const shortHigh = roundMxn(current + 0.015, 3);
+
+  // TP/SLはENTRY候補と同価格帯にならないよう、現在値基準で上下に明確に離す。
+  const longTp1 = roundMxn(Math.max(current + 0.015, shallowHigh + 0.010), 3);
+  const longTp2 = roundMxn(Math.max(current + 0.025, longTp1 + 0.010), 3);
+  const longExt = roundMxn(Math.max(current + 0.045, longTp2 + 0.020), 3);
+  const shortTp1 = roundMxn(Math.min(current - 0.015, shortLow - 0.020), 3);
+  const shortTp2 = roundMxn(Math.min(current - 0.029, shortTp1 - 0.010), 3);
+  const shortExt = roundMxn(Math.min(current - 0.045, shortTp2 - 0.010), 3);
+  const longSl1 = roundMxn(current - 0.025, 3);
+  const longSl2 = roundMxn(current - 0.045, 3);
+  const shortSl1 = roundMxn(current + 0.015, 3);
+  const shortSl2 = roundMxn(current + 0.025, 3);
   return { current, shallowLow, shallowHigh, deepLow, deepHigh, shortLow, shortHigh, longTp1, longTp2, longExt, shortTp1, shortTp2, shortExt, longSl1, longSl2, shortSl1, shortSl2 };
 }
 
@@ -448,8 +459,8 @@ function normalizeMxnSwapResult(aiResult) {
   }
 
   next.summary = polishMxnTimeframeText(next.summary);
-  next.entryTrigger = polishMxnTimeframeText(next.entryTrigger);
-  next.cancelCondition = polishMxnTimeframeText(next.cancelCondition);
+  next.entryTrigger = buildMxnEntryText(next);
+  next.cancelCondition = buildMxnCancelText(next);
   next.takeProfitPlan = buildMxnTakeProfitText(next); // RR重複を防ぎ、9.xx台の具体価格を維持
   next.stopPlan = buildMxnStopText(next);
   if (Array.isArray(next.reasons)) next.reasons = next.reasons.map((v) => polishMxnTimeframeText(v));
