@@ -379,6 +379,70 @@ ${data.stopPlan || ""}`
       aiResult.entryStatus = "WAIT";
     }
   }
+// 上位足ロング背景 + 1分RSI30台のショート過剰補正
+if (result) {
+  const allText = [
+    result.summary,
+    result.entryTrigger,
+    result.cancelCondition,
+    result.takeProfitPlan,
+    result.stopPlan,
+    Array.isArray(result.reasons) ? result.reasons.join(" ") : result.reasons,
+    Array.isArray(result.riskAlerts) ? result.riskAlerts.join(" ") : result.riskAlerts,
+  ]
+    .filter(Boolean)
+    .join(" ");
+
+  const longScore = Number(result.longScore ?? 0);
+  const shortScore = Number(result.shortScore ?? 0);
+  const confidence = Number(result.confidence ?? 0);
+
+  const hasHigherLong =
+    allText.includes("1時間足は上昇") ||
+    allText.includes("1時間足は上向き") ||
+    allText.includes("上昇基調") ||
+    allText.includes("ロング背景");
+
+  const hasRsi30s =
+    allText.includes("RSI33") ||
+    allText.includes("RSIが33") ||
+    allText.includes("RSIは33") ||
+    allText.includes("RSI34") ||
+    allText.includes("RSIが34") ||
+    allText.includes("RSIは34") ||
+    allText.includes("RSIが30台") ||
+    allText.includes("RSI30台") ||
+    allText.includes("30台");
+
+  const hasNoChaseShort =
+    allText.includes("追い売り禁止") ||
+    allText.includes("追い売りは危険") ||
+    allText.includes("安値掴み") ||
+    allText.includes("売られ過ぎ手前");
+
+  const isShortTooStrong =
+    String(result.decision || "").includes("ショート") ||
+    String(result.statusText || "").includes("戻り売り") ||
+    shortScore > longScore;
+
+  if (hasHigherLong && hasRsi30s && hasNoChaseShort && isShortTooStrong) {
+    result.decision = "ロング優勢";
+    result.statusText = "反発確認待ち";
+    result.longScore = Math.max(longScore, 65);
+    result.shortScore = Math.min(shortScore, 45);
+    result.confidence = Math.min(confidence || 65, 65);
+
+    result.summary =
+      "1時間足にはロング背景が残っており、1分足だけ急落してRSI30台まで低下している。現在値からの追い売りは禁止。上位足ロング背景の中で押し目に入っている可能性があり、下げ止まりと反発確認を待つ場面。";
+
+    result.riskAlerts = [
+      "1分RSIが30台で追い売り禁止",
+      "急落直後で上下に振れやすい",
+      "反発確認前の成行ロングも危険",
+      "重要ラインを明確に割るとロング背景が弱くなる",
+    ];
+  }
+}
   const chatCopyText = useMemo(() => {
     if (!aiResult) return "";
 
