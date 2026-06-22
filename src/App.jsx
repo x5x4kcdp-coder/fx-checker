@@ -571,6 +571,56 @@ function deriveNowAction({ normalizedAiResult, result, entryCard }) {
   return "今やること：新規成行禁止。条件一致まで待ち。";
 }
 
+
+function shortenText(text, max = 34) {
+  const clean = String(text || "")
+    .replace(/^・/, "")
+    .replace(/。+$/g, "")
+    .trim();
+  if (clean.length <= max) return clean;
+  return `${clean.slice(0, max)}…`;
+}
+
+function summarizeRiskAlert(alert) {
+  const text = sanitizeMacdWords(String(alert || ""));
+
+  if (text.includes("追い売り")) return "追い売り禁止";
+  if (text.includes("追い買い")) return "追い買い禁止";
+  if (hasMacdMismatchText(text) || text.includes("方向不一致") || text.includes("方向が揃っていない")) {
+    return "上位足と短期足が方向不一致";
+  }
+  if (text.includes("成行禁止") || text.includes("成行エントリーは禁止") || text.includes("確認前")) {
+    return "確認前の成行禁止";
+  }
+  if ((text.includes("RSI") && text.includes("30")) || text.includes("売られ過ぎ")) {
+    return "RSI30付近で反発リスク";
+  }
+  if ((text.includes("RSI") && text.includes("70")) || text.includes("買われ過ぎ")) {
+    return "RSI高めで反落リスク";
+  }
+  if (text.includes("EMA")) return "EMA帯付近で反応待ち";
+  if (text.includes("直近安値") || text.includes("安値掴み")) return "直近安値付近で安値掴み注意";
+  if (text.includes("直近高値") || text.includes("高値掴み")) return "直近高値付近で高値掴み注意";
+  if (text.includes("上位足") && text.includes("ロング")) return "上位足ロング背景で反発注意";
+  if (text.includes("下向き継続")) return "短期MACDは下向き継続";
+  if (text.includes("上向き") && text.includes("鈍化")) return "上向きだが勢い鈍化";
+
+  return shortenText(text);
+}
+
+function buildRiskDisplayItems(riskAlerts, expanded) {
+  const source = Array.isArray(riskAlerts) ? riskAlerts.filter(Boolean) : [];
+  if (expanded) return source.map((item) => sanitizeMacdWords(item));
+
+  const compact = [];
+  for (const item of source) {
+    const summary = summarizeRiskAlert(item);
+    if (summary && !compact.includes(summary)) compact.push(summary);
+    if (compact.length >= 3) break;
+  }
+  return compact;
+}
+
 function deriveMarketOrderCard({ normalizedAiResult, result, riskAlerts, entryCard }) {
   if (!normalizedAiResult) return null;
 
@@ -756,6 +806,7 @@ function App() {
   const [memo, setMemo] = useState("");
   const [aiResult, setAiResult] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [riskExpanded, setRiskExpanded] = useState(false);
 
   const normalizedAiResult = useMemo(() => normalizeFxResult(aiResult, mode), [aiResult, mode]);
 
@@ -803,6 +854,7 @@ function App() {
 
     setLoading(true);
     setAiResult(null);
+    setRiskExpanded(false);
 
     try {
       const formData = new FormData();
@@ -864,6 +916,7 @@ ${normalized.stopPlan || ""}`
     setAnswers({});
     setMemo("");
     setAiResult(null);
+    setRiskExpanded(false);
   };
 
   const changeMode = (newMode) => {
@@ -882,6 +935,11 @@ ${normalized.stopPlan || ""}`
 
     return [];
   }, [normalizedAiResult]);
+
+  const displayedRiskAlerts = useMemo(
+    () => buildRiskDisplayItems(riskAlerts, riskExpanded),
+    [riskAlerts, riskExpanded]
+  );
 
   const entryCard = useMemo(
     () => ({
@@ -1035,18 +1093,29 @@ ${(normalizedAiResult.reasons || []).map((r) => `・${r}`).join("\n")}`;
         </div>
       </section>
 
-      <button className="aiButton" onClick={analyzeWithAi} disabled={loading}>
+      <button className={`aiButton ${normalizedAiResult ? "after-result" : ""}`} onClick={analyzeWithAi} disabled={loading}>
         {loading ? "AI判定中..." : "スクショからAI自動チェック"}
       </button>
 
       {normalizedAiResult && (
         <section className="tradeCards">
-          <div className="dangerAlert">
-            <h3>危険条件アラート</h3>
-            {riskAlerts.length > 0 ? (
-              <ul>
-                {riskAlerts.map((alert, i) => (
-                  <li key={i}>{alert}</li>
+          <div className="dangerAlert risk-card">
+            <div className="riskHeader">
+              <h3>危険条件</h3>
+              {riskAlerts.length > 3 && (
+                <button
+                  type="button"
+                  className="risk-toggle"
+                  onClick={() => setRiskExpanded((v) => !v)}
+                >
+                  {riskExpanded ? "詳細を閉じる" : "詳細を見る"}
+                </button>
+              )}
+            </div>
+            {displayedRiskAlerts.length > 0 ? (
+              <ul className="risk-list">
+                {displayedRiskAlerts.map((alert, i) => (
+                  <li className="risk-item" key={`${alert}-${i}`}>{alert}</li>
                 ))}
               </ul>
             ) : (
