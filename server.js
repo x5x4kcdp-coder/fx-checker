@@ -99,13 +99,89 @@ function sanitizeMxnSwapText(text) {
     .replace(/付近付近/g, "付近");
 }
 
+function polishMxnSwapText(text) {
+  if (!text) return text;
+  let value = String(text);
+
+  value = value
+    .replace(/1短期足/g, "短期足")
+    .replace(/短期RSIは未確認\s*[〜~～-]\s*\d+(?:\.\d+)?\s*付近/g, "短期足の反落確認")
+    .replace(/短期RSIは未確認\s*[〜~～-]\s*\d+(?:\.\d+)?/g, "短期足の反落確認")
+    .replace(/短期RSIは未確認を維持し、?/g, "")
+    .replace(/短期RSIは未確認を維持/g, "")
+    .replace(/短期RSIは未確認でEMA帯割れ/g, "短期足がEMA帯を割り込む")
+    .replace(/短期RSIは未確認でEMA帯回復/g, "短期足がEMA帯を回復")
+    .replace(/短期RSIは未確認でEMA帯/g, "短期足がEMA帯")
+    .replace(/短期RSIは未確認で推移する場合/g, "短期足の反発確認が出ない場合")
+    .replace(/短期RSIは未確認を下回る場合/g, "短期足の反発確認が出ない場合")
+    .replace(/短期RSIは未確認を維持しEMA帯/g, "短期足がEMA帯")
+    .replace(/短期RSIは未確認以上でEMA帯/g, "短期足がEMA帯")
+    .replace(/短期RSIは未確認未満/g, "短期足の反発確認不足")
+    .replace(/短期RSIは未確認以上/g, "短期足の反発確認")
+    .replace(/短期RSIは未確認以下/g, "短期足の反発確認不足")
+    .replace(/短期RSIは未確認付近/g, "短期RSIは未確認")
+    .replace(/短期RSIは未確認台/g, "短期RSIは未確認")
+    .replace(/短期RSIは未確認で反落/g, "短期足の反落確認")
+    .replace(/短期RSIは未確認で反発/g, "短期足の下げ止まり")
+    .replace(/短期RSIは未確認から反落/g, "短期足の反落確認")
+    .replace(/短期RSIは未確認から反発/g, "短期足の下げ止まり")
+    .replace(/短期RSIは未確認へ回復/g, "短期足の下げ止まり")
+    .replace(/短期RSIは未確認を確認/g, "短期足の反発確認")
+    .replace(/短期足の反落確認から反落/g, "短期足の反落確認")
+    .replace(/短期足の反落確認\s*[＋+]?\s*陰線/g, "短期足の反落確認＋陰線")
+    .replace(/短期足は明確な下向き継続で短期上向き継続/g, "短期足は下向きが続いており、反発確認はまだ不足")
+    .replace(/短期足は下向き継続で短期上向き継続/g, "短期足は下向きが続いており、反発確認はまだ不足")
+    .replace(/下向き継続で短期上向き継続/g, "下向きが続いており、反発確認はまだ不足")
+    .replace(/明確な下向き継続で短期上向き継続/g, "下向きが続いており、反発確認はまだ不足")
+    .replace(/短期足の動きは明確な下向き継続で短期上向き継続/g, "短期足は下向きが続いており、反発確認はまだ不足")
+    .replace(/短期足の動きは/g, "短期足は")
+    .replace(/短期足が動き/g, "短期足の動き")
+    .replace(/短期足の動きの/g, "短期足の")
+    .replace(/短期足MACD/g, "短期足の動き")
+    .replace(/短期足の動きが上向き転換し、\s*EMA帯/g, "短期足が上向き転換し、EMA帯")
+    .replace(/短期足の動きが下向き継続/g, "短期足が下向き継続")
+    .replace(/短期足の動き上向き転換/g, "短期足が上向き転換")
+    .replace(/短期足の動き下向き転換/g, "短期足が下向き転換")
+    .replace(/短期足の動き/g, "短期足")
+    .replace(/短期RSIは未確認、?\s*短期RSIは未確認/g, "短期RSIは未確認")
+    .replace(/短期RSIは未確認のため、?\s*短期RSIは未確認/g, "短期RSIは未確認")
+    .replace(/短期RSIは未確認\s*で\s*短期RSIは未確認/g, "短期RSIは未確認")
+    .replace(/短期RSIは未確認\s*。\s*短期RSIは未確認/g, "短期RSIは未確認")
+    .replace(/短期RSIは未確認\s*、\s*反発確認前/g, "短期RSIは未確認のため、反発確認前")
+    .replace(/短期RSIは未確認のため、反発確認前の成行ロングは禁止。?\s*短期RSIは未確認のため、?反発確認前の成行ロングは禁止。?/g, "短期RSIは未確認のため、反発確認前の成行ロングは禁止")
+    .replace(/短期RSIは未確認のため反発確認前の成行ロングは禁止。?/g, "短期RSIは未確認のため、反発確認前の成行ロングは禁止")
+    .replace(/未確認〜/g, "未確認")
+    .replace(/\s+、/g, "、")
+    .replace(/、\s*、/g, "、")
+    .replace(/。\s*。/g, "。")
+    .replace(/付近付近/g, "付近");
+
+  return value.trim();
+}
+
+function uniqueMxnRiskAlerts(alerts) {
+  const rsiRisk = "短期RSIは未確認のため、反発確認前の成行ロングは禁止";
+  const seen = new Set();
+  const result = [];
+  for (const raw of alerts || []) {
+    let item = polishMxnSwapText(sanitizeMxnSwapText(sanitizeDirectionWords(raw || "")));
+    if (!item) continue;
+    if (/短期RSIは未確認/.test(item) && /成行ロングは禁止|反発確認前/.test(item)) item = rsiRisk;
+    const key = item.replace(/[。\s]/g, "");
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(item);
+  }
+  return result;
+}
+
 function normalizeMxnSwapResult(result) {
   const next = { ...result };
   ["summary", "risk", "entryTrigger", "entryPlan", "cancelCondition", "takeProfitPlan", "stopPlan"].forEach((key) => {
-    if (next[key]) next[key] = sanitizeMxnSwapText(sanitizeDirectionWords(next[key]));
+    if (next[key]) next[key] = polishMxnSwapText(sanitizeMxnSwapText(sanitizeDirectionWords(next[key])));
   });
-  if (Array.isArray(next.reasons)) next.reasons = next.reasons.map((v) => sanitizeMxnSwapText(sanitizeDirectionWords(v)));
-  if (Array.isArray(next.riskAlerts)) next.riskAlerts = next.riskAlerts.map((v) => sanitizeMxnSwapText(sanitizeDirectionWords(v)));
+  if (Array.isArray(next.reasons)) next.reasons = next.reasons.map((v) => polishMxnSwapText(sanitizeMxnSwapText(sanitizeDirectionWords(v))));
+  if (Array.isArray(next.riskAlerts)) next.riskAlerts = next.riskAlerts.map((v) => polishMxnSwapText(sanitizeMxnSwapText(sanitizeDirectionWords(v))));
 
   const longScore = Number(next.longScore ?? 0);
   const shortScore = Number(next.shortScore ?? 0);
@@ -118,22 +194,25 @@ function normalizeMxnSwapResult(result) {
 
   const rsiRisk = "短期RSIは未確認のため、反発確認前の成行ロングは禁止";
   const alerts = Array.isArray(next.riskAlerts) ? next.riskAlerts : next.risk ? [next.risk] : [];
-  next.riskAlerts = [...new Set([rsiRisk, ...alerts.map((v) => sanitizeMxnSwapText(v)).filter(Boolean)])].slice(0, 5);
+  next.riskAlerts = uniqueMxnRiskAlerts([rsiRisk, ...alerts]).slice(0, 5);
   next.risk = next.riskAlerts.join("\n");
 
   if (!next.summary || /短期RSIは未確認/.test(next.summary) === false) {
-    next.summary = sanitizeMxnSwapText(`${next.summary || ""} 短期RSIは未確認のため断定せず、短期足の下げ止まり・陽線確定・EMA帯回復を待つ場面。`).trim();
+    next.summary = polishMxnSwapText(sanitizeMxnSwapText(`${next.summary || ""} 短期RSIは未確認のため断定せず、短期足の下げ止まり・陽線確定・EMA帯回復を待つ場面。`)).trim();
   }
 
   if (next.entryTrigger) {
-    next.entryTrigger = sanitizeMxnSwapText(next.entryTrigger)
+    next.entryTrigger = polishMxnSwapText(sanitizeMxnSwapText(next.entryTrigger))
       .replace(/短期足の下げ止まり\s*、?\s*陽線確定/g, "短期足の下げ止まり、陽線確定")
       .replace(/短期足の下げ止まりを確認/g, "短期足の下げ止まりを確認");
   } else {
     next.entryTrigger = "新規成行禁止。ロング候補は現在値付近の浅い押し目で、短期足の下げ止まり、陽線確定、またはEMA帯回復を確認。そのうえで15分足MACDが下向きから鈍化、または上向き転換気味となるなら検討。";
   }
 
-  if (next.takeProfitPlan) next.takeProfitPlan = normalizeTakeProfitText(sanitizeMxnSwapText(next.takeProfitPlan));
+  if (next.takeProfitPlan) next.takeProfitPlan = normalizeTakeProfitText(polishMxnSwapText(sanitizeMxnSwapText(next.takeProfitPlan)));
+  if (next.cancelCondition) next.cancelCondition = polishMxnSwapText(next.cancelCondition);
+  if (next.stopPlan) next.stopPlan = polishMxnSwapText(next.stopPlan);
+  if (Array.isArray(next.reasons)) next.reasons = next.reasons.map(polishMxnSwapText);
   return next;
 }
 
