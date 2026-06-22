@@ -276,6 +276,16 @@ function buildMxnStopText(result) {
   return `ロング時：\n第一SL：${formatMxnPrice(p.longSl1)}割れ\n深めSL：${formatMxnPrice(p.longSl2)}割れ\n撤退条件：短期足が下向き継続し、EMA帯を回復できない場合。\n\nショート時：\n第一SL：${formatMxnPrice(p.shortSl1)}上抜け\n深めSL：${formatMxnPrice(p.shortSl2)}上抜け\n撤退条件：短期足が上向き転換し、EMA帯を回復した場合。`;
 }
 
+
+function buildMxnRiskAlerts(result) {
+  const p = buildMxnPriceLevels(result || {});
+  return [
+    "短期RSIは未確認のため、反発確認前の成行ロングは禁止",
+    "4時間足・1時間足は調整中で、短期足の反発確認はまだ未確定",
+    `${formatMxnPrice(p.shallowLow)}〜${formatMxnPrice(p.shallowHigh)}付近は揉み合いやすく、下抜け時は深押し警戒`,
+  ];
+}
+
 function polishMxnTimeframeText(text) {
   if (!text) return text;
   return String(text)
@@ -284,6 +294,10 @@ function polishMxnTimeframeText(text) {
     .replace(/短期足・短期足/g, "1時間足・15分足")
     .replace(/短期足、短期足/g, "1時間足、15分足")
     .replace(/短期足はまだ下向き継続で短期は混在/g, "15分足はまだ下向きで、短期は混在")
+    .replace(/短期足はまだ下向きでMACDは弱いが下落鈍化の兆しもあり、短期は押し目買い待ちの状態/g, "短期足は下落の勢いが鈍化しつつあるが、反発確認はまだ不足")
+    .replace(/短期足は下落の勢いが鈍化傾向でロング押し目候補/g, "短期足は下落の勢いが鈍化しつつあるが、反発確認はまだ不足")
+    .replace(/4時間足はやや下降傾向だが[0-9]\.\d{3,4}付近の水平線で支えられており押し目の可能性あり/g, "4時間足は調整色があるものの、日足の上昇背景は残る")
+    .replace(/4時間足EMA割れとMACDマイナス継続による押し目割れ警戒/g, "4時間足・1時間足は調整中で、短期足の反発確認はまだ未確定")
     .replace(/短期足が上向き転換し、する場合/g, "短期足が上向き転換した場合")
     .replace(/または短期足が上向き転換し、する場合/g, "または短期足が上向き転換した場合")
     .replace(/短期RSIは未確認維持/g, "")
@@ -368,6 +382,8 @@ function normalizeMxnSwapResult(result) {
   next.takeProfitPlan = buildMxnTakeProfitText(next); // RR重複を防ぎ、9.xx台の具体価格を維持
   next.stopPlan = buildMxnStopText(next);
   if (Array.isArray(next.reasons)) next.reasons = next.reasons.map((v) => polishMxnTimeframeText(v));
+  next.riskAlerts = buildMxnRiskAlerts(next);
+  next.risk = next.riskAlerts.join("\n");
   return next;
 }
 
