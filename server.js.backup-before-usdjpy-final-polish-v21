@@ -709,18 +709,6 @@ function polishUsdShortModeText(text) {
     .replace(/付近付近/g, "付近");
 }
 
-function polishUsdFinalWordingText(text) {
-  if (!text) return text;
-
-  return String(text)
-    .replace(/追い买い/g, "追い買い")
-    .replace(/下向き傾向の?下向き継続/g, "下向き継続")
-    .replace(/5分足MACDは上向き転換し上向き転換気味/g, "5分足MACDは上向き転換気味")
-    .replace(/追い買いは現在値から禁止/g, "現在値からの追い買いは禁止")
-    .replace(/5分足勢い鈍化気味/g, "5分足の上昇勢いはやや鈍化気味")
-    .replace(/現在値付近の浅い([0-9]{3}\.[0-9]{3})\s*[〜~～]\s*([0-9]{3}\.[0-9]{3})付近への押し目/g, "$1〜$2付近への浅い押し目")
-    .replace(/([0-9]{3}\.[0-9]{3})\s*[〜~～]\s*([0-9]{3}\.[0-9]{3})付近への押し目買いで検討/g, "$1〜$2付近で下げ止まり、または同価格帯を回復後に短期EMA上で維持できれば検討");
-}
 function normalizeServerResult(result, mode = "USDJPY") {
   if (mode === "MXNJPY") return normalizeMxnSwapResult(result);
 
@@ -874,12 +862,6 @@ function normalizeServerResult(result, mode = "USDJPY") {
   if (next.takeProfitPlan) next.takeProfitPlan = normalizeTakeProfitText(next.takeProfitPlan);
   if (Array.isArray(next.reasons)) next.reasons = next.reasons.map((v) => polishUsdShortModeText(sanitizeDirectionWords(v)));
   if (Array.isArray(next.riskAlerts)) next.riskAlerts = next.riskAlerts.map((v) => polishUsdShortModeText(sanitizeDirectionWords(v)));
-
-  ["summary", "risk", "entryTrigger", "entryPlan", "cancelCondition", "takeProfitPlan", "stopPlan"].forEach((key) => {
-    if (next[key]) next[key] = polishUsdFinalWordingText(next[key]);
-  });
-  if (Array.isArray(next.reasons)) next.reasons = next.reasons.map((v) => polishUsdFinalWordingText(v));
-  if (Array.isArray(next.riskAlerts)) next.riskAlerts = next.riskAlerts.map((v) => polishUsdFinalWordingText(v));
 
   if (usdRsiZone != null && usdRsiZone >= 30 && usdRsiZone <= 35) {
     next.currentPrice = estimateUsdCurrentPrice(next);
@@ -2877,7 +2859,6 @@ const PORT = process.env.PORT || 8787;
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`AI server running: http://0.0.0.0:${PORT}`);
 });
-
 
 
 
