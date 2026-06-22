@@ -271,6 +271,121 @@ function uniqueMxnRiskAlerts(alerts) {
   return result;
 }
 
+
+function formatMxnPrice(value) {
+  if (!Number.isFinite(value)) return "9.29";
+  return Number(value).toFixed(4).replace(/0+$/, "").replace(/\.$/, "");
+}
+
+function roundMxn(value, digits = 2) {
+  const factor = 10 ** digits;
+  return Math.round(Number(value) * factor) / factor;
+}
+
+function collectMxnPricesFromResult(result) {
+  const text = [
+    result?.summary,
+    result?.risk,
+    result?.entryTrigger,
+    result?.entryPlan,
+    result?.cancelCondition,
+    result?.takeProfitPlan,
+    result?.stopPlan,
+    Array.isArray(result?.reasons) ? result.reasons.join(" ") : result?.reasons,
+    Array.isArray(result?.riskAlerts) ? result.riskAlerts.join(" ") : result?.riskAlerts,
+  ].filter(Boolean).join(" ");
+  const prices = [];
+  for (const match of text.matchAll(/\b9\.\d{2,4}\b/g)) {
+    const v = Number(match[0]);
+    if (v >= 9.0 && v <= 9.8) prices.push(v);
+  }
+  return prices;
+}
+
+function estimateMxnCurrentPrice(result) {
+  const text = [
+    result?.summary,
+    result?.risk,
+    result?.entryTrigger,
+    result?.entryPlan,
+    result?.cancelCondition,
+    result?.takeProfitPlan,
+    result?.stopPlan,
+  ].filter(Boolean).join(" ");
+  const explicit = String(text).match(/現在(?:値|価格)(?:は|が|:|：|\s)*([9]\.\d{2,4})/);
+  if (explicit) return Number(explicit[1]);
+  const prices = collectMxnPricesFromResult(result).sort((a, b) => a - b);
+  if (prices.length >= 3) return prices[Math.floor(prices.length / 2)];
+  if (prices.length === 1) return prices[0];
+  return 9.295;
+}
+
+function buildMxnPriceLevels(result) {
+  const current = estimateMxnCurrentPrice(result);
+  const shallowLow = roundMxn(current - 0.005, 2);
+  const shallowHigh = roundMxn(current + 0.005, 2);
+  const deepLow = roundMxn(current - 0.035, 2);
+  const deepHigh = roundMxn(current - 0.025, 2);
+  const shortLow = roundMxn(current + 0.005, 2);
+  const shortHigh = roundMxn(current + 0.015, 2);
+  const longTp1 = roundMxn(current + 0.015, 2);
+  const longTp2 = roundMxn(current + 0.025, 2);
+  const longExt = roundMxn(current + 0.045, 2);
+  const shortTp1 = roundMxn(current - 0.015, 2);
+  const shortTp2 = Math.round((current - 0.028) * 1000) / 1000;
+  const shortExt = roundMxn(current - 0.045, 2);
+  const longSl1 = roundMxn(current - 0.015, 2);
+  const longSl2 = roundMxn(current - 0.035, 2);
+  const shortSl1 = roundMxn(current + 0.015, 2);
+  const shortSl2 = roundMxn(current + 0.025, 2);
+  return { current, shallowLow, shallowHigh, deepLow, deepHigh, shortLow, shortHigh, longTp1, longTp2, longExt, shortTp1, shortTp2, shortExt, longSl1, longSl2, shortSl1, shortSl2 };
+}
+
+function buildMxnEntryText(result) {
+  const p = buildMxnPriceLevels(result);
+  return `新規成行禁止。\nロング候補：\n${formatMxnPrice(p.shallowLow)}〜${formatMxnPrice(p.shallowHigh)}付近で下げ止まり、短期足の陽線確定またはEMA帯回復を確認。そのうえで15分足MACDの下落鈍化、または上向き転換気味の動きが出ればロング検討。\n深押し候補：\n${formatMxnPrice(p.deepLow)}〜${formatMxnPrice(p.deepHigh)}付近まで押しても、日足の上昇背景が崩れず、短期足で反発確認が出る場合のみ検討。\nショート候補：\nスワップ押し目モードでは優先度低め。${formatMxnPrice(p.shortLow)}〜${formatMxnPrice(p.shortHigh)}付近まで戻した後、上値が重くなり、短期足が再び下向きへ失速する場合のみ短期調整狙いとして検討。`;
+}
+
+function buildMxnCancelText(result) {
+  const p = buildMxnPriceLevels(result);
+  return `ロング候補取消：\n${formatMxnPrice(p.longSl1)}を明確に下抜け、さらに${formatMxnPrice(p.longSl2)}を割り込む場合。または短期足がEMA帯を回復できず、下向き継続となる場合。\nショート候補取消：\n${formatMxnPrice(p.shortSl1)}を明確に上抜け、短期足がEMA帯を回復し、15分足MACDの下向きが鈍化する場合。`;
+}
+
+function buildMxnTakeProfitText(result) {
+  const p = buildMxnPriceLevels(result);
+  return `ロング時：\nTP1：${formatMxnPrice(p.longTp1)}付近\nTP2：${formatMxnPrice(p.longTp2)}付近\n伸びた場合：${formatMxnPrice(p.longExt)}付近\n\nショート時：\nTP1：${formatMxnPrice(p.shortTp1)}付近\nTP2：${formatMxnPrice(p.shortTp2)}付近\n伸びた場合：${formatMxnPrice(p.shortExt)}付近\n\nRR目安：\nTP1は短期利確候補。反発/反落が強く、短期足の方向が維持される場合のみTP2以降を検討。`;
+}
+
+function buildMxnStopText(result) {
+  const p = buildMxnPriceLevels(result);
+  return `ロング時：\n第一SL：${formatMxnPrice(p.longSl1)}割れ\n深めSL：${formatMxnPrice(p.longSl2)}割れ\n撤退条件：短期足が下向き継続し、EMA帯を回復できない場合。\n\nショート時：\n第一SL：${formatMxnPrice(p.shortSl1)}上抜け\n深めSL：${formatMxnPrice(p.shortSl2)}上抜け\n撤退条件：短期足が上向き転換し、EMA帯を回復した場合。`;
+}
+
+function polishMxnTimeframeText(text) {
+  if (!text) return text;
+  return String(text)
+    .replace(/短期足1時間/g, "1時間足")
+    .replace(/短期足と短期足/g, "1時間足と15分足")
+    .replace(/短期足・短期足/g, "1時間足・15分足")
+    .replace(/短期足、短期足/g, "1時間足、15分足")
+    .replace(/短期足はまだ下向き継続で短期は混在/g, "15分足はまだ下向きで、短期は混在")
+    .replace(/短期足が上向き転換し、する場合/g, "短期足が上向き転換した場合")
+    .replace(/または短期足が上向き転換し、する場合/g, "または短期足が上向き転換した場合")
+    .replace(/短期RSIは未確認維持/g, "")
+    .replace(/短期RSIは未確認。/g, "")
+    .replace(/短期RSIは未確認で〜/g, "")
+    .replace(/短期RSIは未確認で/g, "")
+    .replace(/短期RSIは未確認を維持/g, "")
+    .replace(/短期RSIは未確認\s*$/g, "")
+    .replace(/短期足下向き継続/g, "短期足が下向き継続")
+    .replace(/\+\s*。/g, "。")
+    .replace(/、\s*する場合/g, "する場合")
+    .replace(/、\s*場合/g, "場合")
+    .replace(/。\s*。/g, "。")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
 function normalizeMxnSwapResult(aiResult) {
   if (!aiResult) return null;
   let next = { ...aiResult };
@@ -305,10 +420,39 @@ function normalizeMxnSwapResult(aiResult) {
     next.entryTrigger = "新規成行禁止。ロング候補は現在値付近の浅い押し目で、短期足の下げ止まり、陽線確定、またはEMA帯回復を確認。そのうえで15分足MACDが下向きから鈍化、または上向き転換気味となるなら検討。";
   }
 
-  if (next.takeProfitPlan) next.takeProfitPlan = normalizeTakeProfitText(polishMxnSwapText(sanitizeMxnSwapText(next.takeProfitPlan)));
-  if (next.cancelCondition) next.cancelCondition = polishMxnSwapText(next.cancelCondition);
-  if (next.stopPlan) next.stopPlan = polishMxnSwapText(next.stopPlan);
-  if (Array.isArray(next.reasons)) next.reasons = next.reasons.map(polishMxnSwapText);
+  // MXNJPYモードでは「現在値付近」だけのTP/STOPや崩れた時間足表現を避け、9.xx台の目安価格を再生成する。
+  next.summary = polishMxnTimeframeText(next.summary);
+  next.entryTrigger = polishMxnTimeframeText(next.entryTrigger);
+  next.cancelCondition = polishMxnTimeframeText(next.cancelCondition);
+  next.stopPlan = polishMxnTimeframeText(next.stopPlan);
+  if (Array.isArray(next.reasons)) next.reasons = next.reasons.map((v) => polishMxnTimeframeText(v));
+  if (Array.isArray(next.riskAlerts)) next.riskAlerts = uniqueMxnRiskAlerts(next.riskAlerts.map((v) => polishMxnTimeframeText(v))).slice(0, 5);
+  next.risk = (next.riskAlerts || []).join("\n");
+
+  const combinedMxnText = [next.entryTrigger, next.cancelCondition, next.takeProfitPlan, next.stopPlan, next.summary].filter(Boolean).join(" ");
+  if (/現在値付近/.test(combinedMxnText) || /短期足1時間|短期足と短期足|未確認維持|上向き転換し、する場合/.test(combinedMxnText)) {
+    next.entryTrigger = buildMxnEntryText(next);
+    next.cancelCondition = buildMxnCancelText(next);
+    next.takeProfitPlan = buildMxnTakeProfitText(next);
+    next.stopPlan = buildMxnStopText(next);
+  } else {
+    if (next.takeProfitPlan) next.takeProfitPlan = normalizeTakeProfitText(polishMxnTimeframeText(polishMxnSwapText(sanitizeMxnSwapText(next.takeProfitPlan))));
+    if (next.cancelCondition) next.cancelCondition = polishMxnTimeframeText(polishMxnSwapText(next.cancelCondition));
+    if (next.stopPlan) next.stopPlan = polishMxnTimeframeText(polishMxnSwapText(next.stopPlan));
+  }
+
+  // MXNJPYでTP/STOPが抽象表現に寄りすぎた場合も、実用的な9.xx台の目安へ戻す。
+  if (/TP1\s*現在値付近|第一SL\s*現在値付近|深めSL\s*現在値付近/.test(String(next.takeProfitPlan || "") + String(next.stopPlan || ""))) {
+    next.takeProfitPlan = buildMxnTakeProfitText(next);
+    next.stopPlan = buildMxnStopText(next);
+  }
+
+  next.summary = polishMxnTimeframeText(next.summary);
+  next.entryTrigger = polishMxnTimeframeText(next.entryTrigger);
+  next.cancelCondition = polishMxnTimeframeText(next.cancelCondition);
+  next.takeProfitPlan = buildMxnTakeProfitText(next); // RR重複を防ぎ、9.xx台の具体価格を維持
+  next.stopPlan = buildMxnStopText(next);
+  if (Array.isArray(next.reasons)) next.reasons = next.reasons.map((v) => polishMxnTimeframeText(v));
   return next;
 }
 
@@ -361,6 +505,7 @@ function normalizeTakeProfitText(text) {
 
   value = value
     .replace(/RR目安[:：][^\n]*(?:\n)?/g, "")
+    .replace(/RR目安は[^。\n]*。?/g, "")
     .replace(/TP1が近すぎる場合は[^。]*。?/g, "")
     .replace(/TP2まで狙える形が望ましい。?/g, "")
     .trim();
