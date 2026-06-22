@@ -902,3 +902,135 @@ footer {
     font-size: 16px;
   }
 }
+
+/* UI v7: 判定カードのみさらに圧縮 */
+.result {
+  padding: 18px 16px;
+  gap: 10px;
+}
+
+.result h2 {
+  font-size: 30px;
+  line-height: 1.1;
+  margin: 2px 0 6px;
+}
+
+.resultMain p {
+  font-size: 14px;
+  line-height: 1.42;
+  -webkit-line-clamp: 2;
+}
+
+.statusBox.statusCompact {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 8px 10px;
+  min-height: auto;
+  border-radius: 12px;
+}
+
+.statusCompact .status,
+.statusCompact .statusText,
+.statusSeparator {
+  margin: 0;
+  line-height: 1.2;
+}
+
+.statusCompact .status {
+  font-size: 14px;
+  letter-spacing: 0.06em;
+}
+
+.statusCompact .statusText {
+  font-size: 15px;
+  font-weight: 800;
+}
+
+.statusSeparator {
+  color: #b8c7d6;
+  font-weight: 900;
+}
+
+.scoreBox.scoreRow {
+  display: grid;
+  grid-template-columns: 1fr 1fr 0.8fr;
+  gap: 8px;
+}
+
+.scoreCard {
+  min-width: 0;
+  padding: 9px 7px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  text-align: center;
+  font-size: 13px;
+  line-height: 1.15;
+}
+
+.scoreCard span {
+  opacity: 0.9;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+}
+
+.scoreCard b {
+  font-size: 14px;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.diff.scoreCard {
+  color: #c9d7e6;
+  font-weight: 900;
+  background: rgba(255,255,255,0.055);
+}
+
+@media (max-width: 900px) {
+  .result {
+    padding: 14px;
+    gap: 10px;
+    margin-bottom: 12px;
+  }
+
+  .result h2 {
+    font-size: 27px;
+  }
+
+  .resultMain p {
+    font-size: 13.5px;
+    line-height: 1.4;
+    -webkit-line-clamp: 2;
+  }
+
+  .statusBox.statusCompact {
+    padding: 8px 10px;
+  }
+
+  .statusCompact .status {
+    font-size: 13px;
+  }
+
+  .statusCompact .statusText {
+    font-size: 14px;
+  }
+
+  .scoreBox.scoreRow {
+    grid-template-columns: 1fr 1fr 0.75fr;
+    gap: 7px;
+  }
+
+  .scoreCard {
+    padding: 8px 5px;
+    gap: 3px;
+    font-size: 12px;
+  }
+
+  .scoreCard b {
+    font-size: 13px;
+  }
+}

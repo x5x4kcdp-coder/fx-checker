@@ -1022,15 +1022,16 @@ ${(normalizedAiResult.reasons || []).map((r) => `・${r}`).join("\n")}`;
           <p>{result.message}</p>
         </div>
 
-        <div className="statusBox">
-          <div className="status">{loading ? "AI CHECK..." : result.status}</div>
-          <div className="statusText">{loading ? "判定中" : result.statusText}</div>
+        <div className="statusBox statusCompact">
+          <span className="status">{loading ? "AI CHECK..." : result.status}</span>
+          <span className="statusSeparator">：</span>
+          <span className="statusText">{loading ? "判定中" : result.statusText}</span>
         </div>
 
-        <div className="scoreBox">
-          <div className="score longScore">LONG {result.long}点</div>
-          <div className="score shortScore">SHORT {result.short}点</div>
-          <div className="diff">差 {result.diff}点</div>
+        <div className="scoreBox scoreRow">
+          <div className="score scoreCard longScore"><span>LONG</span><b>{result.long}点</b></div>
+          <div className="score scoreCard shortScore"><span>SHORT</span><b>{result.short}点</b></div>
+          <div className="diff scoreCard"><span>差</span><b>{result.diff}点</b></div>
         </div>
       </section>
 
