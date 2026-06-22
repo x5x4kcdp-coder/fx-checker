@@ -543,17 +543,47 @@ function normalizeTakeProfitText(text) {
 
 
 
-function estimateUsdCurrentPrice(result) {
-  const text = makeAllText(result || {});
-  const explicit = String(text).match(/現在(?:値|価格)(?:は|が|:|：|\s)*([0-9]{3}\.[0-9]{3,4})/);
-  if (explicit) return Number(explicit[1]);
-  const prices = [...String(text).matchAll(/\b([0-9]{3}\.[0-9]{3,4})\b/g)]
+function collectUsdPrices(text) {
+  return [...String(text || "").matchAll(/\b([0-9]{3}\.[0-9]{3,4})\b/g)]
     .map((m) => Number(m[1]))
     .filter((v) => Number.isFinite(v) && v >= 100 && v <= 200);
+}
+
+function estimateUsdCurrentPrice(result) {
+  const text = makeAllText(result || {});
+  const directCurrent = Number(result?.currentPrice);
+  if (Number.isFinite(directCurrent) && directCurrent >= 100 && directCurrent <= 200) return directCurrent;
+
+  const explicit = String(text).match(/現在(?:値|価格)(?:は|が|:|：|\s)*([0-9]{3}\.[0-9]{3,4})/);
+  if (explicit) return Number(explicit[1]);
+
+  const prices = collectUsdPrices(text);
   if (!prices.length) return 161.604;
+
   const max = Math.max(...prices);
   const min = Math.min(...prices);
-  if (/戻し|戻り|ショート候補/.test(text) && /ロング候補|TP1/.test(text) && max - min < 0.120) return max + 0.029;
+  const spread = max - min;
+  const cancelPrices = collectUsdPrices(result?.cancelCondition || "");
+  const maxCancel = cancelPrices.length ? Math.max(...cancelPrices) : null;
+
+  if (maxCancel != null && spread > 0.300 && max - maxCancel > 0.250) {
+    return Number((maxCancel + 0.014).toFixed(3));
+  }
+
+  const floors = [...new Set(prices.map((v) => Math.floor(v)))].sort((a, b) => a - b);
+  if (floors.length >= 2 && spread > 0.300) {
+    const lowerGroup = prices.filter((v) => Math.floor(v) === floors[0]);
+    if (lowerGroup.length) return Number((Math.max(...lowerGroup) + 0.014).toFixed(3));
+  }
+
+  const entryPrices = collectUsdPrices(`${result?.entryTrigger || ""} ${result?.entryPlan || ""}`);
+  if (entryPrices.length >= 2) {
+    const entryMax = Math.max(...entryPrices);
+    const entryMin = Math.min(...entryPrices);
+    if (entryMax - entryMin < 0.090) return Number((entryMax + 0.004).toFixed(3));
+  }
+
+  if (/戻し|戻り|ショート候補/.test(text) && /ロング候補|TP1/.test(text) && spread < 0.120) return Number((max + 0.014).toFixed(3));
   return max;
 }
 
@@ -573,7 +603,7 @@ function buildUsdShortModeLevels(result) {
     shortExt: current - 0.094,
     longSl1: current - 0.034,
     longSl2: current - 0.064,
-    shortSl1: current + 0.046,
+    shortSl1: current + 0.056,
     shortSl2: current + 0.076,
   };
 }
@@ -591,6 +621,11 @@ function buildUsdShortModeTakeProfitText(result) {
 function buildUsdShortModeStopText(result) {
   const p = buildUsdShortModeLevels(result);
   return `ロング時：\n第一SL：${fmtPrice(p.longSl1)}割れ\n深めSL：${fmtPrice(p.longSl2)}割れ\n撤退条件：5分MACDが下向き継続し、1分RSIが50を下回って推移する場合。\n\nショート時：\n第一SL：${fmtPrice(p.shortSl1)}上抜け\n深めSL：${fmtPrice(p.shortSl2)}上抜け\n撤退条件：5分MACDが上向き転換し、1分RSI50以上でEMA帯を回復する場合。`;
+}
+
+function buildUsdShortModeCancelText(result) {
+  const p = buildUsdShortModeLevels(result);
+  return `ロング候補取消：\n${fmtPrice(p.longSl1)}を明確に割り込み、さらに${fmtPrice(p.longSl2)}を下抜ける場合。または5分MACDが下向き継続し、1分足が短期EMAを回復できない場合。\nショート候補取消：\n${fmtPrice(p.shortSl1)}を明確に上抜け、さらに${fmtPrice(p.shortSl2)}を上抜ける場合。または5分MACDが上向き転換し、1分RSI50以上でEMA帯を回復する場合。`;
 }
 
 function parseUsdRsiZone(text) {
@@ -749,15 +784,28 @@ function normalizeFxResult(aiResult, mode) {
   const usdDiff = Math.abs(longScore - shortScore);
 
   if (mode === "USDJPY" && usdRsiZone != null && usdRsiZone >= 30 && usdRsiZone <= 35) {
-    decision = usdDiff < 20 || confidence <= 55 || hasMacdMismatch ? "見送り〜ロング寄り" : decision;
+    if (usdDiff < 20 || confidence <= 55 || hasMacdMismatch) {
+      if (hasHigherLong && longScore <= shortScore) {
+        decision = "見送り〜ロング寄り";
+        longScore = 60;
+        shortScore = 50;
+      } else if (longScore < shortScore) {
+        decision = "見送り";
+        longScore = Math.min(longScore || 50, 55);
+        shortScore = Math.max(shortScore || 55, 55);
+      } else {
+        decision = "見送り〜ロング寄り";
+        longScore = Math.min(Math.max(longScore || 60, 60), 65);
+        shortScore = Math.min(shortScore || 50, 50);
+      }
+    }
     state = "反発確認待ち";
     next.entryStatus = "WAIT";
-    longScore = Math.min(longScore || 65, 65);
-    shortScore = Math.max(shortScore || 50, 50);
     confidence = Math.min(confidence || 50, 50);
     next.summary =
       "1時間足にはロング背景が残るが、15分足・5分足はまだ方向が完全には揃っていない。1分RSIは30台前半まで低下しており、追い売りは危険だが、反発確定前の成行ロングも禁止。現在は押し目候補だが、1分足の陽線確定・短期EMA回復・5分MACDの上向き維持を確認したい場面。";
     next.entryTrigger = buildUsdShortModeEntryText(next);
+    next.cancelCondition = buildUsdShortModeCancelText(next);
     next.takeProfitPlan = buildUsdShortModeTakeProfitText(next);
     next.stopPlan = buildUsdShortModeStopText(next);
     next.riskAlerts = [
@@ -937,17 +985,33 @@ function normalizeFxResult(aiResult, mode) {
   next = normalizeTextFields(next);
 
   if (mode === "USDJPY" && usdRsiZone != null && usdRsiZone >= 30 && usdRsiZone <= 35 && (usdDiff < 20 || confidence <= 55 || hasMacdMismatch)) {
-    decision = "見送り〜ロング寄り";
+    if (hasHigherLong && longScore <= shortScore) {
+      decision = "見送り〜ロング寄り";
+      longScore = 60;
+      shortScore = 50;
+    } else if (longScore < shortScore) {
+      decision = "見送り";
+      longScore = Math.min(longScore || 50, 55);
+      shortScore = Math.max(shortScore || 55, 55);
+    } else {
+      decision = "見送り〜ロング寄り";
+      longScore = Math.min(Math.max(longScore || 60, 60), 65);
+      shortScore = Math.min(shortScore || 50, 50);
+    }
     state = "反発確認待ち";
     next.entryStatus = "WAIT";
-    longScore = Math.min(longScore || 65, 65);
-    shortScore = Math.max(shortScore || 50, 50);
     confidence = Math.min(confidence || 50, 50);
     next.summary =
       "1時間足にはロング背景が残るが、15分足・5分足はまだ方向が完全には揃っていない。1分RSIは30台前半まで低下しており、追い売りは危険だが、反発確定前の成行ロングも禁止。現在は押し目候補だが、1分足の陽線確定・短期EMA回復・5分MACDの上向き維持を確認したい場面。";
     next.entryTrigger = buildUsdShortModeEntryText(next);
+    next.cancelCondition = buildUsdShortModeCancelText(next);
     next.takeProfitPlan = buildUsdShortModeTakeProfitText(next);
     next.stopPlan = buildUsdShortModeStopText(next);
+    next.riskAlerts = [
+      "1分RSIは30台前半で追い売りは危険",
+      "反発確定前の成行ロングは禁止",
+      "5分足・15分足の方向が揃うまでは方向待ち",
+    ];
   }
 
   return {
