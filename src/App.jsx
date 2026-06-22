@@ -149,6 +149,10 @@ function sanitizeMacdWords(text) {
     .replace(/MACD赤/g, "MACD上向き")
     .replace(/MACD青/g, "MACD下向き")
     .replace(/付近付近/g, "付近")
+    .replace(/近辺付近/g, "近辺")
+    .replace(/付近近辺/g, "付近")
+    .replace(/候補候補/g, "候補")
+    .replace(/付近\s*付近/g, "付近")
     .replace(/RSIの数値が70を超えておらず、過熱感はまだない/g, "1分RSIは70未満で買われ過ぎではないが、直近上昇後のため現在値からの追い買いは避けたい")
     .replace(/RSIが70未満で過熱感はまだない/g, "1分RSIは70未満で買われ過ぎではないが、直近上昇後のため現在値からの追い買いは避けたい")
     .replace(/過熱感はまだない/g, "買われ過ぎではないが、現在値からの追い買いは避けたい");
