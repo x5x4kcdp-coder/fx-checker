@@ -571,3 +571,151 @@ footer {
     width: 100%;
   }
 }
+
+.quickDecisionGrid {
+  display: grid;
+  grid-template-columns: 1.4fr 0.8fr 1fr;
+  gap: 14px;
+  margin: 0 0 16px;
+}
+
+.quickCard {
+  border-radius: 18px;
+  padding: 16px;
+  background: #0f1d2a;
+  border: 1px solid #39566f;
+  box-shadow: 0 0 18px rgba(0, 0, 0, 0.12);
+}
+
+.quickLabel {
+  display: inline-block;
+  margin-bottom: 8px;
+  color: #9dbbff;
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: 0.12em;
+}
+
+.quickCard p {
+  margin: 0;
+  color: #eaf2f8;
+  font-weight: 800;
+  line-height: 1.55;
+}
+
+.nowActionCard {
+  border-color: #7cc7ff;
+  background: linear-gradient(135deg, rgba(27, 111, 255, 0.18), rgba(0, 179, 255, 0.08));
+}
+
+.marketOrderCard h2 {
+  margin: 0 0 8px;
+  font-size: 28px;
+  color: #ffffff;
+}
+
+.marketOrderCard.danger {
+  border-color: #ff6b6b;
+  background: linear-gradient(135deg, rgba(255, 78, 78, 0.20), rgba(255, 120, 80, 0.08));
+}
+
+.marketOrderCard.wait {
+  border-color: #ffd166;
+  background: linear-gradient(135deg, rgba(255, 209, 102, 0.20), rgba(255, 209, 102, 0.06));
+}
+
+.marketOrderCard.conditional {
+  border-color: #5db7ff;
+  background: linear-gradient(135deg, rgba(93, 183, 255, 0.18), rgba(93, 183, 255, 0.06));
+}
+
+.marketOrderCard.ok {
+  border-color: #49d17d;
+  background: linear-gradient(135deg, rgba(73, 209, 125, 0.18), rgba(73, 209, 125, 0.06));
+}
+
+.skipReasonCard {
+  border-color: #ffd166;
+}
+
+.skipReasonCard ul {
+  margin: 0;
+  padding-left: 20px;
+}
+
+.skipReasonCard li {
+  color: #ffe7a8;
+  font-weight: 800;
+  line-height: 1.5;
+}
+
+.entrySummaryCards {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+}
+
+.entrySummaryCard {
+  border: 1px solid #49d17d;
+  border-radius: 18px;
+  padding: 16px;
+  background: linear-gradient(135deg, rgba(73, 209, 125, 0.12), rgba(73, 209, 125, 0.04));
+}
+
+.entrySummaryCard h3 {
+  margin: 0 0 12px;
+  color: #ffffff;
+  font-size: 18px;
+}
+
+.entrySummaryCard dl,
+.entrySummaryCard div {
+  margin: 0;
+}
+
+.entrySummaryCard dl {
+  display: grid;
+  gap: 8px;
+}
+
+.entrySummaryCard dl div {
+  display: grid;
+  grid-template-columns: 54px 1fr;
+  gap: 8px;
+  align-items: start;
+}
+
+.entrySummaryCard dt {
+  color: #9dbbff;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.entrySummaryCard dd {
+  margin: 0;
+  color: #eaf2f8;
+  font-weight: 800;
+  line-height: 1.45;
+}
+
+.planCard p,
+.aiDetail p {
+  white-space: pre-wrap;
+}
+
+@media (max-width: 900px) {
+  .quickDecisionGrid,
+  .entrySummaryCards {
+    grid-template-columns: 1fr;
+  }
+
+  .quickCard,
+  .entrySummaryCard,
+  .planCard {
+    padding: 15px;
+  }
+
+  .marketOrderCard h2 {
+    font-size: 25px;
+  }
+}

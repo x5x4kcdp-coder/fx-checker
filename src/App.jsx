@@ -133,6 +133,10 @@ function sanitizeMacdWords(text) {
   if (!text) return text;
 
   return String(text)
+    .replace(/赤（上向き）/g, "上向き")
+    .replace(/青（下向き）/g, "下向き")
+    .replace(/赤\s*\(上向き\)/g, "上向き")
+    .replace(/青\s*\(下向き\)/g, "下向き")
     .replace(/赤色で上向き転換気味/g, "上向き転換気味")
     .replace(/赤色で上向き継続/g, "上向き継続")
     .replace(/赤色で上向き/g, "上向き")
@@ -148,6 +152,8 @@ function sanitizeMacdWords(text) {
     .replace(/青の下向き/g, "下向き")
     .replace(/MACD赤/g, "MACD上向き")
     .replace(/MACD青/g, "MACD下向き")
+    .replace(/赤\s*\//g, "上向き/")
+    .replace(/青\s*\//g, "下向き/")
     .replace(/付近付近/g, "付近")
     .replace(/近辺付近/g, "近辺")
     .replace(/付近近辺/g, "付近")
@@ -176,6 +182,43 @@ function normalizeTextFields(result) {
   if (Array.isArray(next.riskAlerts)) next.riskAlerts = next.riskAlerts.map(sanitizeMacdWords);
 
   return next;
+}
+
+function hasMacdMismatchText(text) {
+  return hasAny(text, [
+    "5分足と15分足MACDの方向が揃っていない",
+    "5分足と15分足の方向が揃っていない",
+    "5分・15分MACDの方向が揃っていない",
+    "5分・15分の方向が揃っていない",
+    "5分足と15分足MACD方向不一致",
+    "5分・15分MACD方向不一致",
+    "5分と15分MACDの方向不一致",
+    "5分と15分の方向不一致",
+    "短期足の方向は完全には揃っていない",
+    "方向が揃っておらず",
+    "方向不一致",
+  ]);
+}
+
+function normalizeTakeProfitText(text) {
+  if (!text) return text;
+
+  let value = sanitizeMacdWords(String(text));
+  value = value
+    .replace(/ショート時:\s*TP1\s*[^。]*戻り高値[^。]*(?:。)?/g, "ショート時: TP1 直近安値付近")
+    .replace(/TP1\s*[^。]*戻り高値[^。]*(?:。)?/g, "TP1 直近安値付近")
+    .replace(/TP2\s*[^。]*戻り高値[^。]*(?:。)?/g, "TP2 次の下値支持帯付近")
+    .replace(/直近戻り高値よりわずか下の支持帯付近/g, "直近安値付近")
+    .replace(/次の深めの戻り高値付近/g, "次の下値支持帯付近");
+
+  value = value
+    .replace(/RR目安[:：][^\n]*(?:\n)?/g, "")
+    .replace(/TP1が近すぎる場合は[^。]*。?/g, "")
+    .replace(/TP2まで狙える形が望ましい。?/g, "")
+    .trim();
+
+  const rr = "RR目安: TP1は短期利確候補。反発/反落が強く、5分足の方向が維持される場合のみTP2以降を検討。";
+  return `${value}\n${rr}`.trim();
 }
 
 function hasAny(text, words) {
@@ -310,6 +353,18 @@ function normalizeFxResult(aiResult, mode) {
 
   const textForWait = `${next.entryTrigger || ""} ${next.entryPlan || ""} ${next.summary || ""} ${next.risk || ""}`;
   const hasWaitText = WAIT_WORDS.some((word) => textForWait.includes(word));
+  const hasMacdMismatch = hasMacdMismatchText(allText);
+
+  // 点差15点以下 + RSI中立 + 5分15分不一致は見送り/方向待ちを優先する
+  if (Math.abs(longScore - shortScore) <= 15 && rsi != null && rsi >= 45 && rsi <= 55 && hasMacdMismatch) {
+    decision = "見送り";
+    state = "方向待ち";
+    next.entryStatus = "WAIT";
+    confidence = Math.min(confidence || 50, 50);
+    longScore = Math.min(longScore || 60, 60);
+    next.summary =
+      "1時間足にロング背景はあるが、5分足と15分足の方向が揃っておらず、1分RSIも中立のため方向優位性は弱い。成行エントリーは避けて方向一致を待つ場面。";
+  }
 
   // 小差は方向待ちを優先する
   if (Math.abs(longScore - shortScore) < 10) {
@@ -470,6 +525,144 @@ function normalizeFxResult(aiResult, mode) {
     shortScore: Math.round(shortScore),
     confidence: Math.round(confidence),
   };
+}
+
+
+function extractPriceRanges(text, limit = 3) {
+  const matches = String(text || "").match(/[0-9]{3}\.[0-9]{3,4}\s*[〜~～]\s*[0-9]{3}\.[0-9]{3,4}/g) || [];
+  return [...new Set(matches.map((v) => v.replace(/[~～]/g, "〜")))].slice(0, limit);
+}
+
+function extractSinglePrices(text, limit = 3) {
+  const matches = String(text || "").match(/[0-9]{3}\.[0-9]{3,4}/g) || [];
+  return [...new Set(matches)].slice(0, limit);
+}
+
+function deriveNowAction({ normalizedAiResult, result, entryCard }) {
+  if (!normalizedAiResult) return null;
+
+  const state = String(result?.statusText || normalizedAiResult?.state || "方向待ち");
+  const direction = String(result?.direction || normalizedAiResult?.decision || "見送り");
+  const entryText = entryCard?.entryTrigger || "";
+  const ranges = extractPriceRanges(entryText, 2);
+  const firstRange = ranges[0];
+  const isWait = String(result?.status || normalizedAiResult?.entryStatus || "WAIT").includes("WAIT") || entryText.includes("新規成行禁止");
+
+  if (state.includes("方向待ち") || direction.includes("見送り")) {
+    return "今やること：方向待ち。5分・15分MACDの方向一致、または反発/反落の確定サインまで見送り。";
+  }
+
+  if (state.includes("戻り売り")) {
+    return firstRange
+      ? `今やること：新規成行禁止。${firstRange}付近まで戻して反落確認。`
+      : "今やること：新規成行禁止。直近戻り高値付近まで戻して反落確認。";
+  }
+
+  if (state.includes("押し目") || state.includes("反発")) {
+    return firstRange
+      ? `今やること：新規成行禁止。${firstRange}付近で下げ止まりと反発確認。`
+      : "今やること：新規成行禁止。現在値付近の浅い押し目で反発確認。";
+  }
+
+  if (!isWait && String(result?.status || "").includes("ENTRY")) {
+    return "今やること：条件が揃っているため、STOP位置とRRを確認してエントリー検討。";
+  }
+
+  return "今やること：新規成行禁止。条件一致まで待ち。";
+}
+
+function deriveMarketOrderCard({ normalizedAiResult, result, riskAlerts, entryCard }) {
+  if (!normalizedAiResult) return null;
+
+  const state = String(result?.statusText || normalizedAiResult?.state || "方向待ち");
+  const status = String(result?.status || normalizedAiResult?.entryStatus || "WAIT");
+  const text = makeAllText(normalizedAiResult) + " " + String(entryCard?.entryTrigger || "");
+  let tone = "wait";
+  let label = "条件待ち";
+  let reason = "反発/反落の確定サインが出るまで待ち。";
+
+  if (status.includes("ENTRY")) {
+    tone = "ok";
+    label = "可";
+    reason = "条件が揃っています。STOP位置とRRを確認してください。";
+  } else if (text.includes("新規成行禁止") || text.includes("追い買い禁止") || text.includes("追い売り禁止")) {
+    tone = "danger";
+    label = "禁止";
+    if (text.includes("RSIが70") || text.includes("RSI70") || text.includes("追い買い")) {
+      reason = "1分RSIが高く、追い買いになりやすいため。";
+    } else if (text.includes("RSIが30") || text.includes("RSI30") || text.includes("追い売り")) {
+      reason = "1分RSIが低く、追い売りになりやすいため。";
+    } else {
+      reason = "現在値から入ると追い買い/追い売りになりやすいため。";
+    }
+  } else if (state.includes("方向待ち")) {
+    tone = "wait";
+    label = "待ち";
+    reason = "5分・15分MACDや点差が揃わず、方向優位性が弱いため。";
+  } else if (state.includes("反発") || state.includes("押し目") || state.includes("戻り")) {
+    tone = "conditional";
+    label = "条件付き";
+    reason = `${state}。価格帯到達後の確定サインが必要です。`;
+  }
+
+  const firstRisk = Array.isArray(riskAlerts) && riskAlerts.length > 0 ? riskAlerts[0] : "";
+  return { tone, label, reason: reason || firstRisk };
+}
+
+function deriveSkipReasons({ normalizedAiResult, result, riskAlerts }) {
+  if (!normalizedAiResult) return [];
+
+  const reasons = [];
+  const text = makeAllText(normalizedAiResult);
+  const rsi = parseRsi(text);
+  const diff = Number(result?.diff ?? Math.abs((normalizedAiResult.longScore || 0) - (normalizedAiResult.shortScore || 0)));
+
+  if (diff <= 15) reasons.push("点差が小さい");
+  if (rsi != null && rsi >= 45 && rsi <= 55) reasons.push("RSIが中立");
+  if (rsi != null && rsi >= 60 && rsi < 70) reasons.push("RSIがやや高く追い買い注意");
+  if (rsi != null && rsi <= 40 && rsi > 30) reasons.push("RSIがやや低く追い売り注意");
+  if (hasMacdMismatchText(text)) reasons.push("5分と15分が不一致");
+  if (String(result?.statusText || "").includes("方向待ち")) reasons.push("方向一致待ち");
+  if (Array.isArray(riskAlerts)) {
+    if (riskAlerts.some((r) => String(r).includes("EMA") || String(r).includes("揉み合"))) reasons.push("EMA帯付近で揉み合い");
+  }
+
+  return [...new Set(reasons)].slice(0, 5);
+}
+
+function deriveEntryHighlights({ normalizedAiResult, entryCard, result }) {
+  if (!normalizedAiResult) return [];
+
+  const entryText = entryCard?.entryTrigger || "";
+  const ranges = extractPriceRanges(entryText, 3);
+  const direction = String(result?.direction || normalizedAiResult?.decision || "");
+  const cards = [];
+
+  if (direction.includes("ショート") || entryText.includes("ショート")) {
+    cards.push({
+      title: "ショート第一候補",
+      price: ranges[0] || "直近戻り高値付近",
+      condition: entryText.match(/RSI[^、。\n]*(?:反落|戻り)/)?.[0] || "RSI50〜60から反落",
+      confirm: entryText.includes("EMA") ? "陰線確定 / EMA短期線下抜け" : "陰線確定",
+    });
+    if (ranges[1]) {
+      cards.push({ title: "ショート第二候補", price: ranges[1], condition: "深め戻し後に上値が重い", confirm: "反落確認" });
+    }
+  }
+
+  if (direction.includes("ロング") || entryText.includes("ロング")) {
+    cards.push({
+      title: "ロング第一候補",
+      price: ranges[0] || "現在値付近の浅い押し目",
+      condition: entryText.match(/RSI[^、。\n]*(?:反発|落ち着き)/)?.[0] || "RSI40〜55から反発",
+      confirm: entryText.includes("陽線") ? "陽線確定 / 5分MACD上向き維持" : "反発確認",
+    });
+    if (ranges[1]) {
+      cards.push({ title: "ロング第二候補", price: ranges[1], condition: "深め押し後に下げ止まり", confirm: "陽線確定 / 上位足維持" });
+    }
+  }
+
+  return cards.slice(0, 3);
 }
 
 function buildDisplayResult({ normalizedAiResult, answers, mode }) {
@@ -703,6 +896,26 @@ ${normalized.stopPlan || ""}`
     [normalizedAiResult]
   );
 
+  const nowAction = useMemo(
+    () => deriveNowAction({ normalizedAiResult, result, entryCard }),
+    [normalizedAiResult, result, entryCard]
+  );
+
+  const marketOrderCard = useMemo(
+    () => deriveMarketOrderCard({ normalizedAiResult, result, riskAlerts, entryCard }),
+    [normalizedAiResult, result, riskAlerts, entryCard]
+  );
+
+  const skipReasons = useMemo(
+    () => deriveSkipReasons({ normalizedAiResult, result, riskAlerts }),
+    [normalizedAiResult, result, riskAlerts]
+  );
+
+  const entryHighlights = useMemo(
+    () => deriveEntryHighlights({ normalizedAiResult, entryCard, result }),
+    [normalizedAiResult, entryCard, result]
+  );
+
   const chatCopyText = useMemo(() => {
     if (!normalizedAiResult) return "";
 
@@ -774,6 +987,34 @@ ${(normalizedAiResult.reasons || []).map((r) => `・${r}`).join("\n")}`;
         </button>
       </section>
 
+      {normalizedAiResult && (
+        <section className="quickDecisionGrid">
+          <div className="quickCard nowActionCard">
+            <span className="quickLabel">今やること</span>
+            <p>{nowAction}</p>
+          </div>
+
+          {marketOrderCard && (
+            <div className={`quickCard marketOrderCard ${marketOrderCard.tone}`}>
+              <span className="quickLabel">成行</span>
+              <h2>{marketOrderCard.label}</h2>
+              <p><b>理由：</b>{marketOrderCard.reason}</p>
+            </div>
+          )}
+
+          {(result.direction.includes("見送り") || result.statusText.includes("方向待ち")) && skipReasons.length > 0 && (
+            <div className="quickCard skipReasonCard">
+              <span className="quickLabel">見送り理由</span>
+              <ul>
+                {skipReasons.map((reason) => (
+                  <li key={reason}>{reason}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </section>
+      )}
+
       <section className={`result ${result.className}`}>
         <div className="resultMain">
           <span className="smallLabel">判定</span>
@@ -811,6 +1052,21 @@ ${(normalizedAiResult.reasons || []).map((r) => `・${r}`).join("\n")}`;
               <p>大きな危険条件は検出されていません。</p>
             )}
           </div>
+
+          {entryHighlights.length > 0 && (
+            <div className="entrySummaryCards">
+              {entryHighlights.map((card) => (
+                <div className="entrySummaryCard" key={`${card.title}-${card.price}`}>
+                  <h3>{card.title}</h3>
+                  <dl>
+                    <div><dt>価格</dt><dd>{card.price}</dd></div>
+                    <div><dt>条件</dt><dd>{card.condition}</dd></div>
+                    <div><dt>確認</dt><dd>{card.confirm}</dd></div>
+                  </dl>
+                </div>
+              ))}
+            </div>
+          )}
 
           <div className="entryCards">
             <div className="planCard entry">

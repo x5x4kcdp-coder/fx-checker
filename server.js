@@ -25,6 +25,10 @@ function fileToDataUrl(file) {
 function sanitizeDirectionWords(text) {
   if (!text) return text;
   return String(text)
+    .replace(/赤（上向き）/g, "上向き")
+    .replace(/青（下向き）/g, "下向き")
+    .replace(/赤\s*\(上向き\)/g, "上向き")
+    .replace(/青\s*\(下向き\)/g, "下向き")
     .replace(/赤色で上向き転換気味/g, "上向き転換気味")
     .replace(/赤色で上向き継続/g, "上向き継続")
     .replace(/赤色で上向き/g, "上向き")
@@ -38,6 +42,8 @@ function sanitizeDirectionWords(text) {
     .replace(/青継続/g, "下向き継続")
     .replace(/MACD赤/g, "MACD上向き")
     .replace(/MACD青/g, "MACD下向き")
+    .replace(/赤\s*\//g, "上向き/")
+    .replace(/青\s*\//g, "下向き/")
     .replace(/付近付近/g, "付近")
     .replace(/近辺付近/g, "近辺")
     .replace(/付近近辺/g, "付近")
@@ -101,6 +107,47 @@ function buildMidRsiLongEntryResult(result) {
   return `新規成行禁止。ロング候補: 第一候補は${formatPrice(firstLow)}〜${formatPrice(firstHigh)}付近で下げ止まり、1分RSIが50〜55まで落ち着き、陽線確定した場合。5分MACDが上向き継続し、15分MACDの上向き基調を維持していればロング検討。第二候補は${formatPrice(secondLow)}〜${formatPrice(secondHigh)}付近まで押した場合、15分足の上昇基調が崩れず、1分RSI40〜50から反発したらロング検討。ショート候補: 上位足ロング背景が強いため、ショートは短期逆張り扱い。${formatPrice(shortLow)}〜${formatPrice(shortHigh)}付近で上値が重くなり、1分RSIが60〜70から反落、5分MACDが下向き転換し、陰線確定した場合のみ短期ショート検討。`;
 }
 
+function hasAnyText(text, words) {
+  return words.some((word) => String(text || "").includes(word));
+}
+
+function hasMacdMismatchText(text) {
+  return hasAnyText(text, [
+    "5分足と15分足MACDの方向が揃っていない",
+    "5分足と15分足の方向が揃っていない",
+    "5分・15分MACDの方向が揃っていない",
+    "5分・15分の方向が揃っていない",
+    "5分足と15分足MACD方向不一致",
+    "5分・15分MACD方向不一致",
+    "5分と15分MACDの方向不一致",
+    "5分と15分の方向不一致",
+    "短期足の方向は完全には揃っていない",
+    "方向が揃っておらず",
+    "方向不一致",
+  ]);
+}
+
+function normalizeTakeProfitText(text) {
+  if (!text) return text;
+
+  let value = sanitizeDirectionWords(String(text));
+  value = value
+    .replace(/ショート時:\s*TP1\s*[^。]*戻り高値[^。]*(?:。)?/g, "ショート時: TP1 直近安値付近")
+    .replace(/TP1\s*[^。]*戻り高値[^。]*(?:。)?/g, "TP1 直近安値付近")
+    .replace(/TP2\s*[^。]*戻り高値[^。]*(?:。)?/g, "TP2 次の下値支持帯付近")
+    .replace(/直近戻り高値よりわずか下の支持帯付近/g, "直近安値付近")
+    .replace(/次の深めの戻り高値付近/g, "次の下値支持帯付近");
+
+  value = value
+    .replace(/RR目安[:：][^\n]*(?:\n)?/g, "")
+    .replace(/TP1が近すぎる場合は[^。]*。?/g, "")
+    .replace(/TP2まで狙える形が望ましい。?/g, "")
+    .trim();
+
+  const rr = "RR目安: TP1は短期利確候補。反発/反落が強く、5分足の方向が維持される場合のみTP2以降を検討。";
+  return `${value}\n${rr}`.trim();
+}
+
 function normalizeServerResult(result) {
   const next = { ...result };
 
@@ -132,6 +179,17 @@ function normalizeServerResult(result) {
   const diff = Math.abs(longScore - shortScore);
 
   const hasHigherLong = /1時間足.*?(上昇|上向き|ロング)|上位足ロング|ロング背景|15分足.*?上向き|15分足.*?上昇/.test(allText);
+  const hasMacdMismatch = hasMacdMismatchText(allText);
+
+  if (diff <= 15 && rsi != null && rsi >= 45 && rsi <= 55 && hasMacdMismatch) {
+    next.decision = "見送り";
+    next.state = "方向待ち";
+    next.entryStatus = "WAIT";
+    next.confidence = Math.min(confidence || 50, 50);
+    next.longScore = Math.min(longScore || 60, 60);
+    next.summary =
+      "1時間足にロング背景はあるが、5分足と15分足の方向が揃っておらず、1分RSIも中立のため方向優位性は弱い。成行エントリーは避けて方向一致を待つ場面。";
+  }
 
   if (
     hasHigherLong &&
