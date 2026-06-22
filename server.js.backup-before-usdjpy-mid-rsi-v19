@@ -440,73 +440,6 @@ function buildMidRsiLongEntryResult(result) {
   return `新規成行禁止。ロング候補: 第一候補は${formatPrice(firstLow)}〜${formatPrice(firstHigh)}付近で下げ止まり、1分RSIが50〜55まで落ち着き、陽線確定した場合。5分MACDが上向き継続し、15分MACDの上向き基調を維持していればロング検討。第二候補は${formatPrice(secondLow)}〜${formatPrice(secondHigh)}付近まで押した場合、15分足の上昇基調が崩れず、1分RSI40〜50から反発したらロング検討。ショート候補: 上位足ロング背景が強いため、ショートは短期逆張り扱い。${formatPrice(shortLow)}〜${formatPrice(shortHigh)}付近で上値が重くなり、1分RSIが60〜70から反落、5分MACDが下向き転換し、陰線確定した場合のみ短期ショート検討。`;
 }
 
-function parseUsdRangesFromText(text) {
-  const ranges = [];
-  const s = String(text || "");
-  for (const m of s.matchAll(/([0-9]{3}\.[0-9]{3})\s*[〜~～]\s*([0-9]{3}\.[0-9]{3})/g)) {
-    const low = Number(m[1]);
-    const high = Number(m[2]);
-    if (Number.isFinite(low) && Number.isFinite(high)) {
-      ranges.push([Math.min(low, high), Math.max(low, high)]);
-    }
-  }
-  return ranges;
-}
-
-function buildUsdMidRsiLongLevels(result) {
-  const entryText = String(result?.entryTrigger || result?.entryPlan || "");
-  const ranges = parseUsdRangesFromText(entryText);
-
-  const first = ranges[0] || [161.615, 161.625];
-  const second = ranges[1] || [first[0] - 0.020, first[0] - 0.005];
-  const short = ranges[2] || [first[1] + 0.015, first[1] + 0.035];
-
-  const longTp1 = short[0];
-  const longTp2 = short[1];
-  const longExt = short[1] + 0.020;
-
-  const shortTp1 = Math.max(second[0], first[0] - 0.015);
-  const shortTp2 = shortTp1 - 0.020;
-  const shortExt = shortTp2 - 0.020;
-
-  const longSl1 = second[0];
-  const longSl2 = second[0] - 0.015;
-
-  const shortSl1 = short[1];
-  const shortSl2 = short[1] + 0.020;
-
-  return {
-    first,
-    second,
-    short,
-    longTp1,
-    longTp2,
-    longExt,
-    shortTp1,
-    shortTp2,
-    shortExt,
-    longSl1,
-    longSl2,
-    shortSl1,
-    shortSl2,
-  };
-}
-
-function buildUsdMidRsiLongTakeProfitText(result) {
-  const p = buildUsdMidRsiLongLevels(result);
-  return `ロング時：\nTP1：${formatPrice(p.longTp1)}付近\nTP2：${formatPrice(p.longTp2)}付近\n伸びた場合：${formatPrice(p.longExt)}付近\n\nショート時：\nTP1：${formatPrice(p.shortTp1)}付近\nTP2：${formatPrice(p.shortTp2)}付近\n伸びた場合：${formatPrice(p.shortExt)}付近\n\nRR目安：\nTP1は短期利確候補。反発/反落が強く、5分足の方向が維持される場合のみTP2以降を検討。`;
-}
-
-function buildUsdMidRsiLongCancelText(result) {
-  const p = buildUsdMidRsiLongLevels(result);
-  return `ロング候補取消：\n${formatPrice(p.longSl1)}を明確に割り込み、さらに${formatPrice(p.longSl2)}を下抜ける場合。または5分MACDが下向き継続し、1分RSIが50を下回りEMA帯を維持できない場合。\nショート候補取消：\n${formatPrice(p.shortSl1)}を明確に上抜け、さらに${formatPrice(p.shortSl2)}を上抜ける場合。または5分MACDが上向き継続し、1分RSIが60以上を維持する場合。`;
-}
-
-function buildUsdMidRsiLongStopText(result) {
-  const p = buildUsdMidRsiLongLevels(result);
-  return `ロング時：\n第一SL：${formatPrice(p.longSl1)}割れ\n深めSL：${formatPrice(p.longSl2)}割れ\n撤退条件：5分MACDが下向き転換し、1分RSIが50を割り込み、EMA帯を維持できない場合。\n\nショート時：\n第一SL：${formatPrice(p.shortSl1)}上抜け\n深めSL：${formatPrice(p.shortSl2)}上抜け\n撤退条件：5分MACDが上向き転換し、1分RSI50以上でEMA帯を回復する場合。`;
-}
-
 function hasAnyText(text, words) {
   return words.some((word) => String(text || "").includes(word));
 }
@@ -803,12 +736,7 @@ function normalizeServerResult(result, mode = "USDJPY") {
     next.entryStatus = "WAIT";
     next.confidence = Math.min(confidence || 65, 65);
     const entry = buildMidRsiLongEntryResult(next);
-    if (entry) {
-      next.entryTrigger = entry;
-      next.takeProfitPlan = buildUsdMidRsiLongTakeProfitText(next);
-      next.cancelCondition = buildUsdMidRsiLongCancelText(next);
-      next.stopPlan = buildUsdMidRsiLongStopText(next);
-    }
+    if (entry) next.entryTrigger = entry;
     next.summary = sanitizeDirectionWords(String(next.summary || "").replace(
       /RSI(?:の数値)?が70(?:を)?(?:超えておらず|未満で)[^。]*過熱感[^。]*。?/g,
       "1分RSIは70未満で買われ過ぎではないが、直近上昇後のため現在値からの追い買いは避けたい。"
@@ -2858,7 +2786,6 @@ const PORT = process.env.PORT || 8787;
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`AI server running: http://0.0.0.0:${PORT}`);
 });
-
 
 
 
