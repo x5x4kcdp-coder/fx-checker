@@ -1,4 +1,4 @@
-﻿import { useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import "./App.css";
 
 const MODES = {
@@ -73,6 +73,399 @@ const checks = [
   },
 ];
 
+const WAIT_WORDS = [
+  "新規成行禁止",
+  "成行禁止",
+  "候補",
+  "確認後",
+  "押し目",
+  "戻り",
+  "反発",
+  "反落",
+  "追い買い",
+  "追い売り",
+];
+
+function toText(value) {
+  if (Array.isArray(value)) return value.filter(Boolean).join(" ");
+  if (value == null) return "";
+  return String(value);
+}
+
+function makeAllText(result) {
+  return [
+    result?.decision,
+    result?.entryStatus,
+    result?.summary,
+    result?.risk,
+    result?.entryTrigger,
+    result?.entryPlan,
+    result?.cancelCondition,
+    result?.takeProfitPlan,
+    result?.stopPlan,
+    toText(result?.reasons),
+    toText(result?.riskAlerts),
+  ]
+    .filter(Boolean)
+    .join(" ");
+}
+
+function parseRsi(text) {
+  const patterns = [
+    /1分(?:足)?RSI(?:は|が|:|：|\s)*約?([0-9]{1,2}(?:\.[0-9]+)?)/,
+    /RSI(?:は|が|:|：|\s)*約?([0-9]{1,2}(?:\.[0-9]+)?)/,
+    /RSI([0-9]{1,2}(?:\.[0-9]+)?)/,
+  ];
+
+  for (const pattern of patterns) {
+    const match = text.match(pattern);
+    if (match) return Number(match[1]);
+  }
+
+  if (text.includes("RSI30台") || text.includes("30台")) return 35;
+  if (text.includes("RSI40台") || text.includes("40台")) return 45;
+  if (text.includes("RSI70以上")) return 70;
+  if (text.includes("RSI30以下")) return 30;
+  return null;
+}
+
+function sanitizeMacdWords(text) {
+  if (!text) return text;
+
+  return String(text)
+    .replace(/赤色で上向き転換気味/g, "上向き転換気味")
+    .replace(/赤色で上向き継続/g, "上向き継続")
+    .replace(/赤色で上向き/g, "上向き")
+    .replace(/赤色/g, "上向き傾向")
+    .replace(/青色で下向き継続/g, "下向き継続")
+    .replace(/青色で下向き/g, "下向き")
+    .replace(/青色/g, "下向き傾向")
+    .replace(/赤転換/g, "上向き転換")
+    .replace(/青転換/g, "下向き転換")
+    .replace(/赤継続/g, "上向き継続")
+    .replace(/青継続/g, "下向き継続")
+    .replace(/赤の上向き/g, "上向き")
+    .replace(/青の下向き/g, "下向き")
+    .replace(/MACD赤/g, "MACD上向き")
+    .replace(/MACD青/g, "MACD下向き");
+}
+
+function normalizeTextFields(result) {
+  const next = { ...result };
+  [
+    "summary",
+    "risk",
+    "entryTrigger",
+    "entryPlan",
+    "cancelCondition",
+    "takeProfitPlan",
+    "stopPlan",
+  ].forEach((key) => {
+    if (next[key]) next[key] = sanitizeMacdWords(next[key]);
+  });
+
+  if (Array.isArray(next.reasons)) next.reasons = next.reasons.map(sanitizeMacdWords);
+  if (Array.isArray(next.riskAlerts)) next.riskAlerts = next.riskAlerts.map(sanitizeMacdWords);
+
+  return next;
+}
+
+function hasAny(text, words) {
+  return words.some((word) => text.includes(word));
+}
+
+function clampScore(value, min, max) {
+  const n = Number(value ?? 0);
+  return Math.max(min, Math.min(max, n));
+}
+
+function inferState({ direction, currentState, longScore, shortScore, confidence, rsi, allText }) {
+  const diff = Math.abs(longScore - shortScore);
+
+  if (diff < 10) {
+    if (rsi != null && rsi >= 70) return "反落待ち";
+    if (rsi != null && rsi <= 30) return "反発待ち";
+    return "方向待ち";
+  }
+
+  if (confidence < 50) return "方向待ち";
+
+  if (String(direction).includes("ロング")) {
+    if (rsi != null && rsi >= 70) return "押し目買い待ち";
+    if (rsi != null && rsi >= 40 && rsi <= 55) return "反発確認待ち";
+    if (hasAny(allText, ["押し目", "反発確認", "下げ止まり"])) return "反発確認待ち";
+    return currentState && currentState !== "待ち" ? currentState : "押し目買い待ち";
+  }
+
+  if (String(direction).includes("ショート")) {
+    if (rsi != null && rsi <= 30) return "戻り売り待ち";
+    if (hasAny(allText, ["戻り売り", "上値が重", "反落確認"])) return "戻り売り待ち";
+    return currentState && currentState !== "待ち" ? currentState : "戻り売り待ち";
+  }
+
+  if (currentState && currentState !== "待ち") return currentState;
+  return "方向待ち";
+}
+
+function normalizeFxResult(aiResult, mode) {
+  if (!aiResult) return null;
+
+  let next = normalizeTextFields({ ...aiResult });
+  const allText = makeAllText(next);
+  const rsi = parseRsi(allText);
+  let longScore = Number(next.longScore ?? 0);
+  let shortScore = Number(next.shortScore ?? 0);
+  let confidence = Number(next.confidence ?? 0);
+  let decision = String(next.decision || "見送り");
+  let state = String(next.state || next.statusText || next.entryStatusText || "待ち");
+
+  const hasHigherLong = hasAny(allText, [
+    "1時間足は上昇",
+    "1時間足は上向き",
+    "1時間足MACDは上向き",
+    "1時間足MACDはプラス圏",
+    "上位足ロング",
+    "ロング背景",
+    "上昇基調を維持",
+  ]);
+
+  const hasHigherShort = hasAny(allText, [
+    "1時間足は下降",
+    "1時間足MACDは下向き",
+    "上位足ショート",
+    "下降基調",
+  ]);
+
+  const macdDownContext = hasAny(allText, [
+    "MACD下向き継続",
+    "下向き継続",
+    "5分足MACDは下向き",
+    "5分MACDが下向き",
+    "5分MACD下向き",
+  ]);
+
+  const weakBounceContext = hasAny(allText, [
+    "戻りが弱い",
+    "戻りは弱い",
+    "上値が重",
+    "EMA帯を下回",
+    "EMA帯割れ",
+    "EMAの下",
+    "EMA下",
+    "回復できず",
+  ]);
+
+  const textForWait = `${next.entryTrigger || ""} ${next.entryPlan || ""} ${next.summary || ""} ${next.risk || ""}`;
+  const hasWaitText = WAIT_WORDS.some((word) => textForWait.includes(word));
+
+  // 小差は方向待ちを優先する
+  if (Math.abs(longScore - shortScore) < 10) {
+    decision = "見送り";
+    next.entryStatus = "WAIT";
+    confidence = Math.min(confidence || 50, 50);
+    if (rsi != null && rsi >= 70) state = "反落待ち";
+    else if (rsi != null && rsi <= 30) state = "反発待ち";
+    else state = "方向待ち";
+  }
+
+  // 上位足ロング背景 + RSI30台: 原則ショートへ寄せすぎない。
+  if (mode === "USDJPY" && hasHigherLong && rsi != null && rsi >= 30 && rsi < 40) {
+    if (weakBounceContext && macdDownContext) {
+      decision = "ショート寄り";
+      state = "戻り売り待ち";
+      shortScore = Math.max(shortScore, 60);
+      longScore = Math.min(longScore, 50);
+      confidence = Math.min(confidence || 65, 65);
+      next.summary =
+        "上位足にはロング背景が残るが、1分足がEMA帯を下回り、戻りが弱い。短期はショート寄り。ただし1分RSIは30台で追い売りは禁止のため、戻り売り待ち。";
+    } else {
+      decision = "ロング優勢";
+      state = "反発確認待ち";
+      longScore = Math.max(longScore, 65);
+      shortScore = Math.min(shortScore, 45);
+      confidence = Math.min(confidence || 65, 65);
+      next.entryStatus = "WAIT";
+      next.summary =
+        "上位足にはロング背景があり、1分足だけ急落してRSI30台まで低下している。現在値からの追い売りは禁止。押し目に入っている可能性があり、下げ止まりと反発確認を待つ場面。";
+      next.riskAlerts = [
+        "上位足ロング背景で1分RSIが30台のため、追い売りではなく反発確認待ち",
+        "急落直後で上下に振れやすい",
+        "反発確認前の成行ロングも禁止",
+      ];
+    }
+  }
+
+  // 上位足ロング背景 + RSI40〜50台 + 押し目: 強くしすぎない。
+  if (
+    mode === "USDJPY" &&
+    hasHigherLong &&
+    rsi != null &&
+    rsi >= 40 &&
+    rsi <= 55 &&
+    (String(decision).includes("ロング") || longScore >= shortScore)
+  ) {
+    decision = String(decision).includes("見送り") ? "ロング寄り" : "ロング優勢";
+    state = "反発確認待ち";
+    longScore = clampScore(longScore || 70, 65, 75);
+    shortScore = Math.min(shortScore, 50);
+    confidence = Math.min(confidence || 65, 65);
+    next.entryStatus = "WAIT";
+  }
+
+  // RSI70以上のロング優勢は押し目待ち・成行禁止。
+  if (String(decision).includes("ロング") && rsi != null && rsi >= 70) {
+    state = "押し目買い待ち";
+    next.entryStatus = "WAIT";
+    confidence = Math.min(confidence || 70, 70);
+    next.riskAlerts = [
+      ...(Array.isArray(next.riskAlerts) ? next.riskAlerts : next.risk ? [next.risk] : []),
+      "1分RSIが70以上のため追い買い禁止。押し目買い待ち。",
+    ];
+  }
+
+  // RSI30以下のショート優勢は戻り売り待ち・成行禁止。
+  if (String(decision).includes("ショート") && rsi != null && rsi <= 30) {
+    state = "戻り売り待ち";
+    next.entryStatus = "WAIT";
+    confidence = Math.min(confidence || 70, 70);
+    next.riskAlerts = [
+      ...(Array.isArray(next.riskAlerts) ? next.riskAlerts : next.risk ? [next.risk] : []),
+      "1分RSIが30以下のため追い売り禁止。戻り売り待ち。",
+    ];
+  }
+
+  // 文字上で新規成行禁止/候補/確認待ちがある場合は必ずWAIT。
+  if (hasWaitText) {
+    next.entryStatus = "WAIT";
+  }
+
+  // 方向名と状態ラベルの最終補正。
+  state = inferState({
+    direction: decision,
+    currentState: state,
+    longScore,
+    shortScore,
+    confidence,
+    rsi,
+    allText: makeAllText(next),
+  });
+
+  if (next.entryStatus === "WAIT" && state === "待ち") {
+    state = inferState({
+      direction: decision,
+      currentState: "方向待ち",
+      longScore,
+      shortScore,
+      confidence,
+      rsi,
+      allText: makeAllText(next),
+    });
+  }
+
+  // TPコメントの固定化。
+  if (next.takeProfitPlan) {
+    next.takeProfitPlan = sanitizeMacdWords(next.takeProfitPlan).replace(
+      /TP1は無理に狙わずTP2まで狙う形が望ましい。?/g,
+      "TP1は短期利確候補。反発/反落が強い場合のみTP2以降を検討。"
+    );
+    if (!next.takeProfitPlan.includes("TP1は短期利確候補")) {
+      next.takeProfitPlan +=
+        "\nRR目安: ENTRY価格とSTOP位置次第。TP1は短期利確候補。反発/反落が強い場合のみTP2以降を検討。";
+    }
+  }
+
+  return {
+    ...next,
+    decision,
+    state,
+    entryStatus: next.entryStatus || "WAIT",
+    longScore: Math.round(longScore),
+    shortScore: Math.round(shortScore),
+    confidence: Math.round(confidence),
+  };
+}
+
+function buildDisplayResult({ normalizedAiResult, answers, mode }) {
+  if (normalizedAiResult) {
+    const long = Number(normalizedAiResult.longScore ?? 0);
+    const short = Number(normalizedAiResult.shortScore ?? 0);
+    const diff = Math.abs(long - short);
+    const max = Math.max(long, short);
+
+    let direction = normalizedAiResult.decision || "見送り";
+    let status = normalizedAiResult.entryStatus || "WAIT";
+    let statusText = normalizedAiResult.state || "方向待ち";
+    let className = "wait";
+    const message = normalizedAiResult.summary || "AI判定結果";
+
+    if (String(direction).includes("ロング")) className = "long";
+    if (String(direction).includes("ショート")) className = "short";
+    if (String(direction).includes("見送り")) className = "wait";
+
+    if (status === "ENTRY_OK" || status === "ENTRY OK") {
+      status = "ENTRY OK";
+      statusText = statusText === "待ち" ? "エントリー可" : statusText;
+    } else {
+      status = "WAIT";
+      statusText = statusText && statusText !== "待ち" ? statusText : "方向待ち";
+    }
+
+    if (diff < 10 || max < 50) {
+      direction = direction.includes("見送り") ? direction : "見送り";
+      status = "WAIT";
+      if (!statusText || statusText === "待ち") statusText = "方向待ち";
+      className = "wait";
+    }
+
+    return { long, short, diff, direction, status, statusText, message, className };
+  }
+
+  let long = 0;
+  let short = 0;
+
+  checks.forEach((check) => {
+    const selected = answers[check.id];
+    const option = check.options.find((o) => o.label === selected);
+    if (!option) return;
+    if (option.side === "long") long += option.point;
+    if (option.side === "short") short += option.point;
+  });
+
+  const diff = Math.abs(long - short);
+  const max = Math.max(long, short);
+
+  let direction = "見送り";
+  let status = "WAIT";
+  let statusText = "方向待ち";
+  let message = "方向感が弱いので無理に入らない。";
+  let className = "wait";
+
+  if (max < 45 || diff < 10) {
+    status = "NO ENTRY";
+    statusText = "禁止";
+    message = "ロング・ショートの根拠が混ざっています。";
+    className = "danger";
+  } else if (long >= 75 && diff >= 25) {
+    direction = "ロング優勢";
+    status = "ENTRY OK";
+    statusText = "エントリー可";
+    message = "ロング条件が揃い気味。";
+    className = "long";
+  } else if (short >= 75 && diff >= 25) {
+    direction = "ショート優勢";
+    status = "ENTRY OK";
+    statusText = "エントリー可";
+    message = "ショート条件が揃い気味。";
+    className = "short";
+  } else if (long > short) {
+    direction = mode === "MXNJPY" ? "押し目待ち" : "ややロング";
+  } else if (short > long) {
+    direction = mode === "MXNJPY" ? "買いは慎重" : "ややショート";
+  }
+
+  return { long, short, diff, direction, status, statusText, message, className };
+}
+
 function App() {
   const [mode, setMode] = useState("USDJPY");
   const currentMode = MODES[mode];
@@ -84,103 +477,12 @@ function App() {
   const [aiResult, setAiResult] = useState(null);
   const [loading, setLoading] = useState(false);
 
-  const result = useMemo(() => {
-    if (aiResult) {
-      const long = Number(aiResult.longScore ?? 0);
-      const short = Number(aiResult.shortScore ?? 0);
-      const diff = Math.abs(long - short);
-      const max = Math.max(long, short);
+  const normalizedAiResult = useMemo(() => normalizeFxResult(aiResult, mode), [aiResult, mode]);
 
-      let direction = "見送り";
-      let status = "WAIT";
-      let statusText = "待ち";
-      let className = "wait";
-      let message = aiResult.summary || "AI判定結果";
-
-      if (long >= 75 && long - short >= 20) {
-        direction = mode === "MXNJPY" ? "押し目ロング候補" : "ロング優勢";
-        status = "ENTRY OK";
-        statusText = mode === "MXNJPY" ? "分割候補" : "エントリー可";
-        className = "long";
-      } else if (short >= 75 && short - long >= 20) {
-        direction = mode === "MXNJPY" ? "長期ロング注意" : "ショート優勢";
-        status = "ENTRY OK";
-        statusText = mode === "MXNJPY" ? "買い待ち" : "エントリー可";
-        className = "short";
-      } else if (diff < 10 || max < 60) {
-        direction = "見送り";
-        status = "WAIT";
-        statusText = "待ち";
-        className = "wait";
-      } else if (long >= 60 && short < 60) {
-        direction = mode === "MXNJPY" ? "押し目待ち" : "ロング寄り";
-        status = "WAIT";
-        statusText = mode === "MXNJPY" ? "反発待ち" : "押し目待ち";
-        className = "long";
-      } else if (short >= 60 && long < 60) {
-        direction = mode === "MXNJPY" ? "買いは慎重" : "ショート寄り";
-        status = "WAIT";
-        statusText = mode === "MXNJPY" ? "下げ止まり待ち" : "戻り売り待ち";
-        className = "short";
-      }
-
-      return {
-        long,
-        short,
-        diff,
-        direction,
-        status,
-        statusText,
-        message,
-        className,
-      };
-    }
-
-    let long = 0;
-    let short = 0;
-
-    checks.forEach((check) => {
-      const selected = answers[check.id];
-      const option = check.options.find((o) => o.label === selected);
-      if (!option) return;
-      if (option.side === "long") long += option.point;
-      if (option.side === "short") short += option.point;
-    });
-
-    const diff = Math.abs(long - short);
-    const max = Math.max(long, short);
-
-    let direction = "見送り";
-    let status = "WAIT";
-    let statusText = "待ち";
-    let message = "方向感が弱いので無理に入らない。";
-    let className = "wait";
-
-    if (max < 45 || diff < 10) {
-      status = "NO ENTRY";
-      statusText = "禁止";
-      message = "ロング・ショートの根拠が混ざっています。";
-      className = "danger";
-    } else if (long >= 75 && diff >= 25) {
-      direction = "ロング優勢";
-      status = "ENTRY OK";
-      statusText = "エントリー可";
-      message = "ロング条件が揃い気味。";
-      className = "long";
-    } else if (short >= 75 && diff >= 25) {
-      direction = "ショート優勢";
-      status = "ENTRY OK";
-      statusText = "エントリー可";
-      message = "ショート条件が揃い気味。";
-      className = "short";
-    } else if (long > short) {
-      direction = "ややロング";
-    } else if (short > long) {
-      direction = "ややショート";
-    }
-
-    return { long, short, diff, direction, status, statusText, message, className };
-  }, [answers, aiResult, mode]);
+  const result = useMemo(
+    () => buildDisplayResult({ normalizedAiResult, answers, mode }),
+    [answers, normalizedAiResult, mode]
+  );
 
   const handleImage = (index, file) => {
     if (!file) return;
@@ -245,27 +547,28 @@ function App() {
 
       setAiResult(data);
 
+      const normalized = normalizeFxResult(data, mode) || data;
       setMemo(
         `モード: ${currentMode.name}
-AI判定: ${data.decision}
-ステータス: ${data.entryStatus}
-LONG: ${data.longScore}点 / SHORT: ${data.shortScore}点
-信頼度: ${data.confidence}
+AI判定: ${normalized.decision}
+ステータス: ${normalized.entryStatus}
+LONG: ${normalized.longScore}点 / SHORT: ${normalized.shortScore}点
+信頼度: ${normalized.confidence}
 
 理由:
-${(data.reasons || []).map((r) => `・${r}`).join("\n")}
+${(normalized.reasons || []).map((r) => `・${r}`).join("\n")}
 
 注意:
-${data.risk || ""}
+${(normalized.riskAlerts || [normalized.risk]).filter(Boolean).map((r) => `・${r}`).join("\n")}
 
 エントリー:
-${data.entryPlan || ""}
+${normalized.entryTrigger || normalized.entryPlan || ""}
 
 利確:
-${data.takeProfitPlan || ""}
+${normalized.takeProfitPlan || ""}
 
 撤退:
-${data.stopPlan || ""}`
+${normalized.stopPlan || ""}`
       );
     } catch (e) {
       alert("AIサーバーにつながりません。node server.js が起動しているか確認してください。");
@@ -289,182 +592,32 @@ ${data.stopPlan || ""}`
   };
 
   const riskAlerts = useMemo(() => {
-    if (!aiResult) return [];
+    if (!normalizedAiResult) return [];
 
-    if (Array.isArray(aiResult.riskAlerts) && aiResult.riskAlerts.length > 0) {
-      return aiResult.riskAlerts;
+    if (Array.isArray(normalizedAiResult.riskAlerts) && normalizedAiResult.riskAlerts.length > 0) {
+      return normalizedAiResult.riskAlerts;
     }
 
-    if (aiResult.risk) return [aiResult.risk];
+    if (normalizedAiResult.risk) return [normalizedAiResult.risk];
 
     return [];
-  }, [aiResult]);
+  }, [normalizedAiResult]);
 
-  const entryCard = {
-    entryTrigger: aiResult?.entryTrigger || aiResult?.entryPlan || "AI判定後に表示されます。",
-    cancelCondition: aiResult?.cancelCondition || "AI判定後に表示されます。",
-    takeProfitPlan: aiResult?.takeProfitPlan || "AI判定後に表示されます。",
-    stopPlan: aiResult?.stopPlan || "AI判定後に表示されます。",
-  };
-
-
-
-  // 安全装置：AI本文と状態ラベルの矛盾をフロント側で補正
-  const entryTextForGuard = `${entryCard.entryTrigger || ""} ${aiResult?.summary || ""}`;
-  const riskTextForGuard = Array.isArray(riskAlerts) ? riskAlerts.join(" ") : "";
-  const confidenceForGuard = Number(aiResult?.confidence ?? 0);
-
-  const forceWaitKeywords = [
-    "新規成行禁止",
-    "成行禁止",
-    "戻り売り待ち",
-    "戻り待ち",
-    "押し目待ち",
-    "待ち",
-    "確認後",
-    "候補",
-    "〜後",
-    "戻り後",
-    "押し目後",
-    "付近への戻り",
-    "反落",
-    "反発",
-  ];
-
-  const riskWaitKeywords = [
-    "追い売り",
-    "追い買い",
-    "乖離",
-    "直近安値",
-    "直近高値",
-  ];
-
-  const forceWaitByText = forceWaitKeywords.some((word) =>
-    entryTextForGuard.includes(word)
+  const entryCard = useMemo(
+    () => ({
+      entryTrigger:
+        normalizedAiResult?.entryTrigger ||
+        normalizedAiResult?.entryPlan ||
+        "AI判定後に表示されます。",
+      cancelCondition: normalizedAiResult?.cancelCondition || "AI判定後に表示されます。",
+      takeProfitPlan: normalizedAiResult?.takeProfitPlan || "AI判定後に表示されます。",
+      stopPlan: normalizedAiResult?.stopPlan || "AI判定後に表示されます。",
+    }),
+    [normalizedAiResult]
   );
 
-  const forceWaitByRisk = riskWaitKeywords.some((word) =>
-    riskTextForGuard.includes(word)
-  );
-
-  const forceWaitByConfidence =
-    aiResult && confidenceForGuard < 50;
-
-  const shouldForceWait =
-    aiResult && (forceWaitByText || forceWaitByRisk || forceWaitByConfidence);
-
-  if (shouldForceWait && result) {
-    const scoreDiffForGuard = Math.abs(Number(result.long || 0) - Number(result.short || 0));
-
-    if (scoreDiffForGuard <= 10 && confidenceForGuard <= 50) {
-      result.statusText = "方向待ち";
-    } else if (
-      entryTextForGuard.includes("戻り売り待ち") ||
-      entryTextForGuard.includes("戻り売り候補") ||
-      entryTextForGuard.includes("戻り後") ||
-      entryTextForGuard.includes("付近への戻り")
-    ) {
-      result.statusText = "戻り売り待ち";
-    } else if (
-      entryTextForGuard.includes("押し目待ち") ||
-      entryTextForGuard.includes("押し目買い候補") ||
-      entryTextForGuard.includes("押し目後")
-    ) {
-      result.statusText = "押し目待ち";
-    } else {
-      result.statusText = "待ち";
-    }
-
-    if (aiResult) {
-      aiResult.entryStatus = "WAIT";
-    }
-  }
-// 上位足ロング背景 + 1分RSI30台のショート過剰補正
-if (result) {
-  const allText = [
-    result.summary,
-    result.entryTrigger,
-    result.cancelCondition,
-    result.takeProfitPlan,
-    result.stopPlan,
-    Array.isArray(result.reasons) ? result.reasons.join(" ") : result.reasons,
-    Array.isArray(result.riskAlerts) ? result.riskAlerts.join(" ") : result.riskAlerts,
-  ]
-    .filter(Boolean)
-    .join(" ");
-
-  const longScore = Number(result.longScore ?? 0);
-  const shortScore = Number(result.shortScore ?? 0);
-  const confidence = Number(result.confidence ?? 0);
-
-  const hasHigherLong =
-    allText.includes("1時間足は上昇") ||
-    allText.includes("1時間足は上向き") ||
-    allText.includes("1時間足MACD") && allText.includes("上昇基調") ||
-    allText.includes("上位足ロング") ||
-    allText.includes("ロング背景") ||
-    allText.includes("上昇基調を維持");
-
-  const hasRsi30s =
-    allText.includes("RSI33") ||
-    allText.includes("RSIは33") ||
-    allText.includes("RSIが33") ||
-    allText.includes("RSI 33") ||
-    allText.includes("RSI34") ||
-    allText.includes("RSIは34") ||
-    allText.includes("RSIが34") ||
-    allText.includes("RSI30台") ||
-    allText.includes("RSIが30〜40") ||
-    allText.includes("RSIが30") ||
-    allText.includes("30〜40") ||
-    allText.includes("売られ過ぎ手前");
-
-  const hasNoChaseShort =
-    allText.includes("追い売り禁止") ||
-    allText.includes("追い売りは危険") ||
-    allText.includes("追い売りは避け") ||
-    allText.includes("追い売りは高リスク") ||
-    allText.includes("安値掴み") ||
-    allText.includes("直近大きく下落");
-
-  const isShortTooStrong =
-    String(result.decision || "").includes("ショート") ||
-    String(result.statusText || "").includes("戻り売り") ||
-    String(result.state || "").includes("戻り売り") ||
-    String(result.entryStatus || "").includes("戻り売り") ||
-    shortScore > longScore;
-
-  if (hasHigherLong && hasRsi30s && hasNoChaseShort && isShortTooStrong) {
-    result.decision = "ロング優勢";
-
-    // 状態表示に使われる可能性がある項目を全部補正
-    result.statusText = "反発確認待ち";
-    result.state = "反発確認待ち";
-    result.entryStatus = "WAIT";
-
-    result.longScore = Math.max(longScore, 65);
-    result.shortScore = Math.min(shortScore, 45);
-    result.confidence = Math.min(confidence || 65, 65);
-
-    result.summary =
-      "1時間足にはロング背景が残っており、1分足だけ急落してRSI30台まで低下している。現在値からの追い売りは禁止。上位足ロング背景の中で押し目に入っている可能性があり、下げ止まりと反発確認を待つ場面。";
-
-    result.riskAlerts = [
-      "1分RSIが30台で追い売り禁止",
-      "急落直後で上下に振れやすい",
-      "反発確認前の成行ロングも危険",
-      "重要ラインを明確に割るとロング背景が弱くなる",
-    ];
-
-    result.entryTrigger =
-      "新規成行禁止。ロング候補: 161.520〜161.540付近で下げ止まり、1分RSIが40〜50へ回復。そのうえで1分足陽線確定、5分足がEMA帯を維持するならロング検討。深押し候補: 161.500〜161.520付近まで押しても15分足の上昇基調が崩れず、1分RSI30〜40から反発するならロング候補。ショート候補: 161.500を明確に割り込み、5分MACDが下向き転換し、15分足も失速する場合のみ短期ショート検討。";
-
-    result.cancelCondition =
-      "ロング候補取消: 161.500を明確に割り込み、さらに161.480を下抜ける場合。または5分足がEMA帯を回復できず、1分RSIが40未満で推移する場合。ショート転換条件: 161.500割れ後、戻りでEMA帯を回復できず、5分・15分がともに下向きへ転換する場合。";
-  }
-}
   const chatCopyText = useMemo(() => {
-    if (!aiResult) return "";
+    if (!normalizedAiResult) return "";
 
     return `【FXチェック結果】
 モード：${currentMode.name}
@@ -473,10 +626,10 @@ if (result) {
 LONG：${result.long}点
 SHORT：${result.short}点
 差：${result.diff}点
-信頼度：${aiResult.confidence ?? "-"}点
+信頼度：${normalizedAiResult.confidence ?? "-"}点
 
 総評：
-${aiResult.summary || "-"}
+${normalizedAiResult.summary || "-"}
 
 危険条件：
 ${riskAlerts.length > 0 ? riskAlerts.map((r) => `・${r}`).join("\n") : "・特になし"}
@@ -494,8 +647,8 @@ STOP：
 ${entryCard.stopPlan}
 
 AI理由：
-${(aiResult.reasons || []).map((r) => `・${r}`).join("\n")}`;
-  }, [aiResult, currentMode.name, result, riskAlerts, entryCard]);
+${(normalizedAiResult.reasons || []).map((r) => `・${r}`).join("\n")}`;
+  }, [normalizedAiResult, currentMode.name, result, riskAlerts, entryCard]);
 
   const copyForChat = async () => {
     if (!chatCopyText) return;
@@ -557,7 +710,7 @@ ${(aiResult.reasons || []).map((r) => `・${r}`).join("\n")}`;
         {loading ? "AI判定中..." : "スクショからAI自動チェック"}
       </button>
 
-      {aiResult && (
+      {normalizedAiResult && (
         <section className="tradeCards">
           <div className="dangerAlert">
             <h3>危険条件アラート</h3>
@@ -600,7 +753,7 @@ ${(aiResult.reasons || []).map((r) => `・${r}`).join("\n")}`;
         </section>
       )}
 
-      {aiResult && (
+      {normalizedAiResult && (
         <section className="copyBox">
           <div className="copyHeader">
             <h3>ChatGPTに送る用テキスト</h3>
@@ -649,18 +802,18 @@ ${(aiResult.reasons || []).map((r) => `・${r}`).join("\n")}`;
         ))}
       </section>
 
-      {aiResult && (
+      {normalizedAiResult && (
         <section className="aiDetail">
           <h3>AIの理由</h3>
           <ul>
-            {(aiResult.reasons || []).map((reason, i) => (
+            {(normalizedAiResult.reasons || []).map((reason, i) => (
               <li key={i}>{reason}</li>
             ))}
           </ul>
-          <p><b>注意:</b> {aiResult.risk}</p>
-          <p><b>エントリー:</b> {aiResult.entryPlan}</p>
-          <p><b>利確:</b> {aiResult.takeProfitPlan}</p>
-          <p><b>撤退:</b> {aiResult.stopPlan}</p>
+          <p><b>注意:</b> {riskAlerts.join(" / ") || normalizedAiResult.risk}</p>
+          <p><b>エントリー:</b> {entryCard.entryTrigger}</p>
+          <p><b>利確:</b> {entryCard.takeProfitPlan}</p>
+          <p><b>撤退:</b> {entryCard.stopPlan}</p>
         </section>
       )}
 
@@ -681,16 +834,3 @@ ${(aiResult.reasons || []).map((r) => `・${r}`).join("\n")}`;
 }
 
 export default App;
-
-
-
-
-
-
-
-
-
-
-
-
-

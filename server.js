@@ -1,4 +1,4 @@
-﻿import express from "express";
+import express from "express";
 import cors from "cors";
 import multer from "multer";
 import dotenv from "dotenv";
@@ -19,6 +19,92 @@ const client = new OpenAI({
 function fileToDataUrl(file) {
   const base64 = file.buffer.toString("base64");
   return `data:${file.mimetype};base64,${base64}`;
+}
+
+
+function sanitizeDirectionWords(text) {
+  if (!text) return text;
+  return String(text)
+    .replace(/赤色で上向き転換気味/g, "上向き転換気味")
+    .replace(/赤色で上向き継続/g, "上向き継続")
+    .replace(/赤色で上向き/g, "上向き")
+    .replace(/赤色/g, "上向き傾向")
+    .replace(/青色で下向き継続/g, "下向き継続")
+    .replace(/青色で下向き/g, "下向き")
+    .replace(/青色/g, "下向き傾向")
+    .replace(/赤転換/g, "上向き転換")
+    .replace(/青転換/g, "下向き転換")
+    .replace(/赤継続/g, "上向き継続")
+    .replace(/青継続/g, "下向き継続")
+    .replace(/MACD赤/g, "MACD上向き")
+    .replace(/MACD青/g, "MACD下向き");
+}
+
+function normalizeServerResult(result) {
+  const next = { ...result };
+
+  ["summary", "risk", "entryTrigger", "entryPlan", "cancelCondition", "takeProfitPlan", "stopPlan"].forEach((key) => {
+    if (next[key]) next[key] = sanitizeDirectionWords(next[key]);
+  });
+
+  if (Array.isArray(next.reasons)) next.reasons = next.reasons.map(sanitizeDirectionWords);
+  if (Array.isArray(next.riskAlerts)) next.riskAlerts = next.riskAlerts.map(sanitizeDirectionWords);
+
+  const longScore = Number(next.longScore ?? 0);
+  const shortScore = Number(next.shortScore ?? 0);
+  const confidence = Number(next.confidence ?? 0);
+  const allText = [
+    next.decision,
+    next.summary,
+    next.risk,
+    next.entryTrigger,
+    next.entryPlan,
+    next.cancelCondition,
+    next.takeProfitPlan,
+    next.stopPlan,
+    Array.isArray(next.reasons) ? next.reasons.join(" ") : next.reasons,
+    Array.isArray(next.riskAlerts) ? next.riskAlerts.join(" ") : next.riskAlerts,
+  ].filter(Boolean).join(" ");
+
+  const rsiMatch = allText.match(/RSI(?:は|が|:|：|\s)*約?([0-9]{1,2}(?:\.[0-9]+)?)/);
+  const rsi = rsiMatch ? Number(rsiMatch[1]) : null;
+  const diff = Math.abs(longScore - shortScore);
+
+  if (diff < 10) {
+    next.decision = "見送り";
+    next.entryStatus = "WAIT";
+    next.confidence = Math.min(confidence || 50, 50);
+    next.state = rsi != null && rsi >= 70 ? "反落待ち" : rsi != null && rsi <= 30 ? "反発待ち" : "方向待ち";
+  }
+
+  if (String(next.decision || "").includes("ロング") && rsi != null && rsi >= 70) {
+    next.state = "押し目買い待ち";
+    next.entryStatus = "WAIT";
+    next.confidence = Math.min(Number(next.confidence ?? 70), 70);
+  }
+
+  if (String(next.decision || "").includes("ショート") && rsi != null && rsi <= 30) {
+    next.state = "戻り売り待ち";
+    next.entryStatus = "WAIT";
+    next.confidence = Math.min(Number(next.confidence ?? 70), 70);
+  }
+
+  if (
+    [next.summary, next.entryTrigger, next.entryPlan, next.risk].filter(Boolean).join(" ").match(/新規成行禁止|成行禁止|追い買い|追い売り|候補|確認後|押し目|戻り/)
+  ) {
+    next.entryStatus = "WAIT";
+    if (!next.state || next.state === "待ち") {
+      if (String(next.decision || "").includes("ロング")) next.state = rsi != null && rsi >= 70 ? "押し目買い待ち" : "反発確認待ち";
+      else if (String(next.decision || "").includes("ショート")) next.state = "戻り売り待ち";
+      else next.state = "方向待ち";
+    }
+  }
+
+  if (next.takeProfitPlan && !next.takeProfitPlan.includes("TP1は短期利確候補")) {
+    next.takeProfitPlan += "\nRR目安: ENTRY価格とSTOP位置次第。TP1は短期利確候補。反発/反落が強い場合のみTP2以降を検討。";
+  }
+
+  return next;
 }
 
 function buildPrompt(mode, pair) {
@@ -1929,6 +2015,7 @@ app.post(
         };
       }
 
+      result = normalizeServerResult(result);
       res.json(result);
     } catch (error) {
       console.error(error);
