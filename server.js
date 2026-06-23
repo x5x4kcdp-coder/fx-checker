@@ -35,6 +35,10 @@ function sortDisplayedPriceRanges(text) {
 function sanitizeDirectionWords(text) {
   if (!text) return text;
   return String(text)
+    .replace(/青から赤へ切り替わり上向き転換気味/g, "上向き転換気味だが、勢いはまだやや限定的")
+    .replace(/青から赤へ切り替わり上向き/g, "上向き転換気味")
+    .replace(/赤から青へ切り替わり下向き転換気味/g, "下向き転換気味")
+    .replace(/赤から青へ切り替わり下向き/g, "下向き転換気味")
     .replace(/赤（上向き）/g, "上向き")
     .replace(/青（下向き）/g, "下向き")
     .replace(/赤\s*\(上向き\)/g, "上向き")
@@ -849,6 +853,78 @@ function buildUsdShortModeCancelText(result) {
   return `ロング候補取消：\n${formatPrice(p.longSl1)}を明確に割り込み、さらに${formatPrice(p.longSl2)}を下抜ける場合。または5分MACDが下向き継続し、1分足が短期EMAを回復できない場合。\nショート候補取消：\n${formatPrice(p.shortSl1)}を明確に上抜け、さらに${formatPrice(p.shortSl2)}を上抜ける場合。または5分MACDが上向き転換し、1分RSI50以上でEMA帯を回復する場合。`;
 }
 
+
+function extractUsdShortCandidateRange(result) {
+  const text = String(result?.entryTrigger || result?.entryPlan || "");
+  const section = text.match(/ショート候補[:：]?([\s\S]*)/);
+  const target = section ? section[1] : text;
+  const match = target.match(/([0-9]{3}\.[0-9]{3,4})\s*[〜~～]\s*([0-9]{3}\.[0-9]{3,4})/);
+  if (!match) return null;
+  const a = Number(match[1]);
+  const b = Number(match[2]);
+  if (!Number.isFinite(a) || !Number.isFinite(b)) return null;
+  return { low: Math.min(a, b), high: Math.max(a, b) };
+}
+
+function buildUsdShortSideSafetyLevels(result) {
+  const range = extractUsdShortCandidateRange(result);
+  if (range) {
+    return {
+      cancelLow: range.high,
+      cancelHigh: range.high + 0.010,
+      sl1: range.high + 0.010,
+      sl2: range.high + 0.030,
+    };
+  }
+
+  const current = estimateUsdCurrentPrice(result);
+  if (!current) return null;
+  return {
+    cancelLow: current + 0.035,
+    cancelHigh: current + 0.045,
+    sl1: current + 0.045,
+    sl2: current + 0.065,
+  };
+}
+
+function replaceUsdShortCancelText(text, result) {
+  const levels = buildUsdShortSideSafetyLevels(result);
+  if (!levels) return text;
+  const replacement = `ショート候補取消：\n${formatPrice(levels.cancelLow)}〜${formatPrice(levels.cancelHigh)}を明確に上抜け、\nまたは5分MACDが上向き継続し、1分RSIが50以上を維持する場合。`;
+  const value = String(text || "");
+  if (/ショート候補取消[:：]/.test(value)) {
+    return value.replace(/ショート候補取消[:：][\s\S]*?(?=\n?見送り継続[:：]|$)/, replacement);
+  }
+  return `${value.trim()}\n${replacement}`.trim();
+}
+
+function replaceUsdShortStopText(text, result) {
+  const levels = buildUsdShortSideSafetyLevels(result);
+  if (!levels) return text;
+  const replacement = `ショート時：\n第一SL：${formatPrice(levels.sl1)}上抜け\n深めSL：${formatPrice(levels.sl2)}上抜け\n撤退条件：5分MACD上向き継続＋1分RSI50以上でEMA帯を維持する場合。`;
+  const value = String(text || "");
+  if (/ショート時[:：]/.test(value)) {
+    return value.replace(/ショート時[:：][\s\S]*$/, replacement);
+  }
+  return `${value.trim()}\n\n${replacement}`.trim();
+}
+
+function normalizeUsdHighRsiShortSide(result) {
+  if (!result) return result;
+  const next = { ...result };
+  next.cancelCondition = replaceUsdShortCancelText(next.cancelCondition, next);
+  next.stopPlan = replaceUsdShortStopText(next.stopPlan, next);
+  if (Array.isArray(next.reasons)) {
+    next.reasons = next.reasons.map((reason) => String(reason)
+      .replace(/1時間足MACDは上向き継続し上昇基調を維持/g, "1時間足は反発基調だが、上昇継続の確認はまだ必要")
+      .replace(/青から赤へ切り替わり上向き転換気味/g, "上向き転換気味だが、勢いはまだやや限定的")
+      .replace(/上向き傾向に転換し上向き/g, "上向き転換気味")
+      .replace(/上向き転換し上向き/g, "上向き転換気味")
+    );
+  }
+  return next;
+}
+
 function parseUsdRsiZone(text) {
   const s = String(text || "");
   const exact = s.match(/1分(?:足)?RSI(?:は|が|:|：|\s)*約?([0-9]{1,2}(?:\.[0-9]+)?)/);
@@ -861,6 +937,10 @@ function parseUsdRsiZone(text) {
 function polishUsdShortModeText(text) {
   if (!text) return text;
   let value = String(text)
+    .replace(/青から赤へ切り替わり上向き転換気味/g, "上向き転換気味だが、勢いはまだやや限定的")
+    .replace(/青から赤へ切り替わり上向き/g, "上向き転換気味")
+    .replace(/赤から青へ切り替わり下向き転換気味/g, "下向き転換気味")
+    .replace(/赤から青へ切り替わり下向き/g, "下向き転換気味")
     .replace(/1分足RSIは40台前半/g, "1分RSIは40台前半")
     .replace(/1時間足MACDは上向きで上昇基調を継続している/g, "1時間足は反発基調だが、上昇継続の確認はまだ必要")
     .replace(/1時間足MACDは上昇基調でロング加点/g, "1時間足は反発基調でロング材料だが、上昇継続の確認はまだ必要")
@@ -1007,6 +1087,16 @@ function normalizeServerResult(result, mode = "USDJPY") {
       "5分足の上昇勢いはやや鈍化気味",
       "直近高値付近では揉み合いやすい",
     ];
+    next.reasons = [
+      "1時間足は反発基調だが、上昇継続の確認はまだ必要",
+      "15分足MACDは上向き継続でロング方向",
+      "5分足MACDは上向き転換気味だが、勢いはまだやや限定的",
+      rsi != null ? `1分足RSIは${rsi}でやや高く、追い買いは避けたい` : "1分足RSIはやや高く、追い買いは避けたい",
+    ];
+    const fixedHighRsi = normalizeUsdHighRsiShortSide(next);
+    next.cancelCondition = fixedHighRsi.cancelCondition;
+    next.stopPlan = fixedHighRsi.stopPlan;
+    next.reasons = fixedHighRsi.reasons;
   }
 
   if (diff < 10) {
@@ -1061,6 +1151,13 @@ function normalizeServerResult(result, mode = "USDJPY") {
       "反発確定前の成行ロングは禁止",
       "5分足・15分足の方向が揃うまでは方向待ち",
     ];
+  }
+
+  if (usdRsiZone != null && usdRsiZone >= 65 && usdRsiZone < 70 && String(next.decision || "").includes("ロング")) {
+    const fixed = normalizeUsdHighRsiShortSide(next);
+    next.cancelCondition = polishUsdShortModeText(sanitizeDirectionWords(fixed.cancelCondition));
+    next.stopPlan = polishUsdShortModeText(sanitizeDirectionWords(fixed.stopPlan));
+    if (Array.isArray(fixed.reasons)) next.reasons = fixed.reasons.map((v) => polishUsdShortModeText(sanitizeDirectionWords(v)));
   }
 
   return next;

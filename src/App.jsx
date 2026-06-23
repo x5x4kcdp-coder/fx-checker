@@ -133,6 +133,10 @@ function sanitizeMacdWords(text) {
   if (!text) return text;
 
   return String(text)
+    .replace(/青から赤へ切り替わり上向き転換気味/g, "上向き転換気味だが、勢いはまだやや限定的")
+    .replace(/青から赤へ切り替わり上向き/g, "上向き転換気味")
+    .replace(/赤から青へ切り替わり下向き転換気味/g, "下向き転換気味")
+    .replace(/赤から青へ切り替わり下向き/g, "下向き転換気味")
     .replace(/赤（上向き）/g, "上向き")
     .replace(/青（下向き）/g, "下向き")
     .replace(/赤\s*\(上向き\)/g, "上向き")
