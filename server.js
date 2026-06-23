@@ -1118,6 +1118,144 @@ function polishUsdWaitWordingResult(result) {
   return next;
 }
 
+
+function normalizeUsdJpyShortText(result) {
+  if (!result) return result;
+
+  // USDJPY短期モードの最終出力直前に通す一括整形。
+  // 価格アンカー・ENTRY/TP/STOP価格生成後の文章だけを補正する。
+  let next = polishUsdWaitWordingResult({ ...result });
+  const textKeys = ["summary", "risk", "entryTrigger", "entryPlan", "cancelCondition", "takeProfitPlan", "stopPlan"];
+  const long = Number(next.longScore ?? 0);
+  const short = Number(next.shortScore ?? 0);
+  const diff = Math.abs(long - short);
+
+  const normalizeText = (text) => {
+    if (!text) return text;
+    let value = polishUsdShortModeText(sanitizeDirectionWords(String(text)));
+
+    value = value
+      // MACD色表現を方向表現へ統一
+      .replace(/15分足MACDは赤で上向き継続気味の状態/g, "15分足MACDは上向き継続気味でロング方向")
+      .replace(/15分足MACDは赤で上向き継続気味/g, "15分足MACDは上向き継続気味でロング方向")
+      .replace(/5分足MACDは赤で上向き転換気味/g, "5分足MACDは上向き転換気味だが、勢いはまだ限定的")
+      .replace(/青から赤へ切り替わり上向き転換気味/g, "上向き転換気味だが、勢いはまだ限定的")
+      .replace(/青から赤へ切り替わり上向き/g, "上向き転換気味")
+      .replace(/赤から青へ切り替わり下向き転換気味/g, "下向き転換気味")
+      .replace(/赤から青へ切り替わり下向き/g, "下向き転換気味")
+      .replace(/MACD赤/g, "MACD上向き")
+      .replace(/MACD青/g, "MACD下向き")
+      .replace(/MACDは赤/g, "MACDは上向き")
+      .replace(/MACDは青/g, "MACDは下向き")
+      .replace(/MACDが赤/g, "MACDが上向き")
+      .replace(/MACDが青/g, "MACDが下向き")
+      .replace(/赤で上向き継続気味の状態/g, "上向き継続気味でロング方向")
+      .replace(/赤で上向き継続気味/g, "上向き継続気味でロング方向")
+      .replace(/赤で上向き転換気味/g, "上向き転換気味だが、勢いはまだ限定的")
+      .replace(/青で下向き継続気味の状態/g, "下向き継続気味")
+      .replace(/青で下向き転換気味/g, "下向き転換気味")
+      .replace(/赤に転換/g, "上向き転換")
+      .replace(/青に転換/g, "下向き転換")
+      .replace(/赤転換/g, "上向き転換")
+      .replace(/青転換/g, "下向き転換")
+      .replace(/赤継続/g, "上向き継続")
+      .replace(/青継続/g, "下向き継続")
+      .replace(/赤/g, "上向き")
+      .replace(/青/g, "下向き")
+
+      // 色置換後の重複表現を整理
+      .replace(/上向きで上向き継続気味の状態/g, "上向き継続気味でロング方向")
+      .replace(/上向きで上向き継続気味/g, "上向き継続気味でロング方向")
+      .replace(/上向きで上向き転換気味/g, "上向き転換気味")
+      .replace(/下向きで下向き継続気味の状態/g, "下向き継続気味")
+      .replace(/下向きで下向き転換気味/g, "下向き転換気味")
+      .replace(/上向き傾向へ上向き継続/g, "上向き継続")
+      .replace(/下向き傾向へ下向き継続/g, "下向き継続")
+      .replace(/上向き傾向上向き継続/g, "上向き継続")
+      .replace(/下向き傾向下向き継続/g, "下向き継続")
+      .replace(/上向き傾向に転換し上向き/g, "上向き転換気味")
+      .replace(/下向き傾向に転換し下向き/g, "下向き転換")
+      .replace(/上向き転換し上向き/g, "上向き転換気味")
+      .replace(/下向き転換し下向き/g, "下向き転換")
+      .replace(/上向き上向き/g, "上向き")
+      .replace(/下向き下向き/g, "下向き")
+
+      // RSIは追い買いではなく押し目待ち表現に統一
+      .replace(/1分(?:足)?RSIは([0-9]{1,2}(?:\.[0-9]+)?)で買われ過ぎ手前[^。\n]*/g, "1分足RSIは$1でやや高く、現在値からは追い買いせず押し目を待ちたい位置")
+      .replace(/1分(?:足)?RSIは([0-9]{1,2}(?:\.[0-9]+)?)でやや強く押し目買い条件に適合/g, "1分足RSIは$1でやや高く、現在値からは追い買いせず押し目を待ちたい位置")
+      .replace(/1分(?:足)?RSIは([0-9]{1,2}(?:\.[0-9]+)?)でやや強く買われ過ぎ圏ではないが追い買い注意圏/g, "1分足RSIは$1でやや高く、現在値からは追い買いせず押し目を待ちたい位置")
+      .replace(/1分(?:足)?RSIは([0-9]{1,2}(?:\.[0-9]+)?)でやや強い買い圧力があり、?追い買い注意圏内/g, "1分足RSIは$1でやや高く、現在値からは追い買いせず押し目を待ちたい位置")
+      .replace(/1分(?:足)?RSIは([0-9]{1,2}(?:\.[0-9]+)?)でやや強く[^。\n]*追い買い注意[^。\n]*/g, "1分足RSIは$1でやや高く、現在値からは追い買いせず押し目を待ちたい位置")
+
+      // STOP欄の重複表現を整理
+      .replace(/5分MACDの下向き継続、?1分RSIが50を下回り、?EMA回復失敗の場合/g, "5分MACDが下向き転換し、1分RSIが50を下回り、EMA回復に失敗する場合")
+      .replace(/5分MACDの下向き傾向下向き継続、?1分RSIが50を下回り、?EMA回復失敗の場合/g, "5分MACDが下向き転換し、1分RSIが50を下回り、EMA回復に失敗する場合")
+      .replace(/5分MACDが下向き傾向下向き継続/g, "5分MACDが下向き継続")
+      .replace(/5分MACDの下向き傾向下向き継続/g, "5分MACDが下向き継続")
+      .replace(/5分MACD下向き継続/g, "5分MACDが下向き継続")
+      .replace(/5分MACDが上向き傾向上向き継続/g, "5分MACDが上向き継続")
+      .replace(/5分MACD上向き継続/g, "5分MACDが上向き継続")
+      .replace(/撤退条件\s+/g, "撤退条件：")
+      .replace(/：：/g, "：")
+      .replace(/。\s*。/g, "。")
+      .replace(/付近付近/g, "付近");
+
+    if (diff === 20) {
+      value = value
+        .replace(/LONG\/SHORTの点差は20点未満で方向優位性はやや限定的/g, "LONG/SHORTの点差は20点で、方向優位性はあるが強くはない")
+        .replace(/LONG\/SHORTの点差は20点未満/g, "LONG/SHORTの点差は20点")
+        .replace(/点差は20点未満/g, "点差は20点");
+    }
+
+    return sortDisplayedPriceRanges(value.trim());
+  };
+
+  textKeys.forEach((key) => {
+    if (next[key]) next[key] = normalizeText(next[key]);
+  });
+  if (Array.isArray(next.reasons)) next.reasons = next.reasons.map((v) => normalizeText(v));
+  if (Array.isArray(next.riskAlerts)) next.riskAlerts = next.riskAlerts.map((v) => normalizeText(v));
+
+  const decisionText = String(next.decision || "").trim();
+  const isWaitDecision = decisionText.toUpperCase() === "WAIT" || decisionText === "待ち";
+  if (isWaitDecision) {
+    if (long - short >= 20) {
+      next.decision = "ロング寄り";
+      next.state = "押し目買い待ち / 反発確認待ち";
+    } else if (short - long >= 20) {
+      next.decision = "ショート寄り";
+      next.state = "戻り売り待ち / 反落確認待ち";
+    } else {
+      next.decision = "見送り";
+      next.state = next.state && next.state !== "待ち" ? next.state : "方向待ち";
+    }
+    next.entryStatus = "WAIT";
+  }
+
+  if (long - short >= 20 && String(next.state || "").includes("方向待ち")) {
+    next.state = "押し目買い待ち / 反発確認待ち";
+  }
+
+  // ショート候補があるUSDJPYでは、TP/STOPも必ずセットで最後に整える。
+  if (hasUsdShortCandidateText(next)) {
+    next.takeProfitPlan = ensureUsdShortTakeProfitText(next.takeProfitPlan, next);
+    next.stopPlan = replaceUsdShortStopText(next.stopPlan, next);
+    next.cancelCondition = replaceUsdShortCancelText(next.cancelCondition, next);
+  }
+
+  // TP欄はRR目安を1回だけにする。
+  if (next.takeProfitPlan) {
+    next.takeProfitPlan = normalizeText(normalizeTakeProfitText(next.takeProfitPlan));
+  }
+  if (next.stopPlan) next.stopPlan = normalizeText(next.stopPlan);
+  if (next.cancelCondition) next.cancelCondition = normalizeText(next.cancelCondition);
+  if (Array.isArray(next.reasons)) next.reasons = next.reasons.map((v) => normalizeText(v));
+  if (Array.isArray(next.riskAlerts)) next.riskAlerts = next.riskAlerts.map((v) => normalizeText(v));
+
+  return next;
+}
+
+
 function normalizeServerResult(result, mode = "USDJPY") {
   if (mode === "MXNJPY") return normalizeMxnSwapResult(result);
 
@@ -1326,7 +1464,7 @@ function normalizeServerResult(result, mode = "USDJPY") {
 
   if (Array.isArray(next.reasons)) next.reasons = next.reasons.map((v) => polishUsdShortModeText(sanitizeDirectionWords(v)));
 
-  return polishUsdWaitWordingResult(next);
+  return normalizeUsdJpyShortText(next);
 }
 
 function buildPrompt(mode, pair) {
