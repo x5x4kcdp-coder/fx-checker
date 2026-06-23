@@ -677,6 +677,7 @@ function normalizeMxnSwapResult(result) {
   }
 
   applyMxnBelowBuySummaryOverrideV21(next);
+  next = applyMxnFinalHardOverrideV24(next);
   return next;
 }
 
