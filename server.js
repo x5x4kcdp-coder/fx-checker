@@ -933,6 +933,40 @@ function replaceUsdShortStopText(text, result) {
   return `${value.trim()}\n\n${replacement}`.trim();
 }
 
+
+function hasUsdShortCandidateText(result) {
+  return /ショート候補[:：]?/.test(`${result?.entryTrigger || ""}\n${result?.entryPlan || ""}`);
+}
+
+function buildUsdShortTakeProfitTextFromCandidate(result) {
+  const range = extractUsdShortCandidateRange(result);
+  if (range) {
+    return `ショート時：\nTP1：${formatPrice(range.low - 0.020)}付近\nTP2：${formatPrice(range.low - 0.040)}付近\n伸びた場合：${formatPrice(range.low - 0.060)}付近`;
+  }
+
+  const current = estimateUsdCurrentPrice(result);
+  if (!current) return "";
+  return `ショート時：\nTP1：${formatPrice(current - 0.004)}付近\nTP2：${formatPrice(current - 0.024)}付近\n伸びた場合：${formatPrice(current - 0.044)}付近`;
+}
+
+function ensureUsdShortTakeProfitText(text, result) {
+  if (!hasUsdShortCandidateText(result)) return text;
+  const shortText = buildUsdShortTakeProfitTextFromCandidate(result);
+  if (!shortText) return text;
+
+  let value = String(text || "")
+    .replace(/RR目安[:：][\s\S]*$/g, "")
+    .trim();
+
+  if (/ショート時[:：]/.test(value)) {
+    value = value.replace(/ショート時[:：][\s\S]*$/g, shortText);
+  } else {
+    value = `${value}\n\n${shortText}`.trim();
+  }
+
+  return `${value}\n\nRR目安：\nTP1は短期利確候補。反発/反落が強く、5分足の方向が維持される場合のみTP2以降を検討。`.trim();
+}
+
 function normalizeUsdHighRsiShortSide(result) {
   if (!result) return result;
   const next = { ...result };
@@ -965,6 +999,8 @@ function polishUsdShortModeText(text) {
     .replace(/青から赤へ切り替わり上向き/g, "上向き転換気味")
     .replace(/赤から青へ切り替わり下向き転換気味/g, "下向き転換気味")
     .replace(/赤から青へ切り替わり下向き/g, "下向き転換気味")
+    .replace(/1分足RSIは([0-9]{1,2}(?:\.[0-9]+)?)でやや強く押し目買い条件に適合/g, "1分足RSIは$1でやや高く、押し目を待ちたい位置")
+    .replace(/1分RSIは([0-9]{1,2}(?:\.[0-9]+)?)でやや強く押し目買い条件に適合/g, "1分RSIは$1でやや高く、押し目を待ちたい位置")
     .replace(/1分足RSIは40台前半/g, "1分RSIは40台前半")
     .replace(/1時間足MACDは上向きで上昇基調を継続している/g, "1時間足は反発基調だが、上昇継続の確認はまだ必要")
     .replace(/1時間足MACDは上昇基調でロング加点/g, "1時間足は反発基調でロング材料だが、上昇継続の確認はまだ必要")
@@ -1188,6 +1224,14 @@ function normalizeServerResult(result, mode = "USDJPY") {
     next.stopPlan = polishUsdShortModeText(sanitizeDirectionWords(fixed.stopPlan));
     if (Array.isArray(fixed.reasons)) next.reasons = fixed.reasons.map((v) => polishUsdShortModeText(sanitizeDirectionWords(v)));
   }
+
+  if (hasUsdShortCandidateText(next)) {
+    next.takeProfitPlan = ensureUsdShortTakeProfitText(next.takeProfitPlan, next);
+    next.stopPlan = polishUsdShortModeText(sanitizeDirectionWords(replaceUsdShortStopText(next.stopPlan, next)));
+    next.cancelCondition = polishUsdShortModeText(sanitizeDirectionWords(replaceUsdShortCancelText(next.cancelCondition, next)));
+  }
+
+  if (Array.isArray(next.reasons)) next.reasons = next.reasons.map((v) => polishUsdShortModeText(sanitizeDirectionWords(v)));
 
   return next;
 }
