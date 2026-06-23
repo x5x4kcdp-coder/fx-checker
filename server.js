@@ -45,6 +45,12 @@ function sanitizeDirectionWords(text) {
     .replace(/1分足RSIは([0-9]{1,2}(?:\.[0-9]+)?)で買われ過ぎ手前もまだ反落サインは出ていない/g, "1分足RSIは$1でやや高く、現在値からは追い買いせず押し目を待ちたい位置")
     .replace(/1分足RSIは([0-9]{1,2}(?:\.[0-9]+)?)でやや強く押し目買い条件に適合/g, "1分足RSIは$1でやや高く、現在値からは追い買いせず押し目を待ちたい位置")
     .replace(/1分RSIは([0-9]{1,2}(?:\.[0-9]+)?)でやや強く押し目買い条件に適合/g, "1分RSIは$1でやや高く、現在値からは追い買いせず押し目を待ちたい位置")
+    .replace(/1分(?:足)?RSIは([0-9]{1,2}(?:\.[0-9]+)?)でやや強く買われ過ぎ圏ではないが追い買い注意圏/g, "1分足RSIは$1でやや高く、現在値からは追い買いせず押し目を待ちたい位置")
+    .replace(/1分(?:足)?RSIは([0-9]{1,2}(?:\.[0-9]+)?)でやや強い買い圧力があり、?追い買い注意圏内/g, "1分足RSIは$1でやや高く、現在値からは追い買いせず押し目を待ちたい位置")
+    .replace(/1分(?:足)?RSIは([0-9]{1,2}(?:\.[0-9]+)?)でやや強く[^。\n]*追い買い注意[^。\n]*/g, "1分足RSIは$1でやや高く、現在値からは追い買いせず押し目を待ちたい位置")
+    .replace(/LONG\/SHORTの点差は20点未満で方向優位性はやや限定的/g, "LONG/SHORTの点差は20点で、方向優位性はあるが強くはない")
+    .replace(/LONG\/SHORTの点差は20点未満/g, "LONG/SHORTの点差は20点")
+    .replace(/点差は20点未満/g, "点差は20点")
     .replace(/赤（上向き）/g, "上向き")
     .replace(/青（下向き）/g, "下向き")
     .replace(/赤\s*\(上向き\)/g, "上向き")
@@ -1019,6 +1025,12 @@ function polishUsdShortModeText(text) {
     .replace(/1分足RSIは([0-9]{1,2}(?:\.[0-9]+)?)で買われ過ぎ手前もまだ反落サインは出ていない/g, "1分足RSIは$1でやや高く、現在値からは追い買いせず押し目を待ちたい位置")
     .replace(/1分足RSIは([0-9]{1,2}(?:\.[0-9]+)?)でやや強く押し目買い条件に適合/g, "1分足RSIは$1でやや高く、現在値からは追い買いせず押し目を待ちたい位置")
     .replace(/1分RSIは([0-9]{1,2}(?:\.[0-9]+)?)でやや強く押し目買い条件に適合/g, "1分RSIは$1でやや高く、現在値からは追い買いせず押し目を待ちたい位置")
+    .replace(/1分(?:足)?RSIは([0-9]{1,2}(?:\.[0-9]+)?)でやや強く買われ過ぎ圏ではないが追い買い注意圏/g, "1分足RSIは$1でやや高く、現在値からは追い買いせず押し目を待ちたい位置")
+    .replace(/1分(?:足)?RSIは([0-9]{1,2}(?:\.[0-9]+)?)でやや強い買い圧力があり、?追い買い注意圏内/g, "1分足RSIは$1でやや高く、現在値からは追い買いせず押し目を待ちたい位置")
+    .replace(/1分(?:足)?RSIは([0-9]{1,2}(?:\.[0-9]+)?)でやや強く[^。\n]*追い買い注意[^。\n]*/g, "1分足RSIは$1でやや高く、現在値からは追い買いせず押し目を待ちたい位置")
+    .replace(/LONG\/SHORTの点差は20点未満で方向優位性はやや限定的/g, "LONG/SHORTの点差は20点で、方向優位性はあるが強くはない")
+    .replace(/LONG\/SHORTの点差は20点未満/g, "LONG/SHORTの点差は20点")
+    .replace(/点差は20点未満/g, "点差は20点")
     .replace(/1分足RSIは([0-9]{1,2}(?:\.[0-9]+)?)でやや強く押し目買い条件に適合/g, "1分足RSIは$1でやや高く、押し目を待ちたい位置")
     .replace(/1分RSIは([0-9]{1,2}(?:\.[0-9]+)?)でやや強く押し目買い条件に適合/g, "1分RSIは$1でやや高く、押し目を待ちたい位置")
     .replace(/1分足RSIは40台前半/g, "1分RSIは40台前半")
@@ -1048,6 +1060,62 @@ function polishUsdShortModeText(text) {
     .replace(/青で下向き転換気味/g, "下向き転換気味")
     .replace(/付近付近/g, "付近");
   return sortDisplayedPriceRanges(value);
+}
+
+
+function polishUsdWaitWordingResult(result) {
+  if (!result) return result;
+  const next = { ...result };
+  const keys = ["summary", "risk", "entryTrigger", "entryPlan", "cancelCondition", "takeProfitPlan", "stopPlan"];
+  keys.forEach((key) => {
+    if (next[key]) next[key] = polishUsdShortModeText(sanitizeDirectionWords(next[key]));
+  });
+  if (Array.isArray(next.reasons)) next.reasons = next.reasons.map((v) => polishUsdShortModeText(sanitizeDirectionWords(v)));
+  if (Array.isArray(next.riskAlerts)) next.riskAlerts = next.riskAlerts.map((v) => polishUsdShortModeText(sanitizeDirectionWords(v)));
+
+  const long = Number(next.longScore ?? 0);
+  const short = Number(next.shortScore ?? 0);
+  const diff = Math.abs(long - short);
+  const decisionText = String(next.decision || "").trim();
+  const isWaitDecision = decisionText.toUpperCase() === "WAIT" || decisionText === "待ち";
+
+  if (isWaitDecision) {
+    if (long - short >= 20) {
+      next.decision = "ロング寄り";
+      next.state = "押し目買い待ち / 反発確認待ち";
+      next.entryStatus = "WAIT";
+    } else if (short - long >= 20) {
+      next.decision = "ショート寄り";
+      next.state = "戻り売り待ち / 反落確認待ち";
+      next.entryStatus = "WAIT";
+    } else {
+      next.decision = "見送り";
+      next.state = next.state && next.state !== "待ち" ? next.state : "方向待ち";
+      next.entryStatus = "WAIT";
+    }
+  }
+
+  if (long - short >= 20 && String(next.state || "").includes("方向待ち")) {
+    next.state = "押し目買い待ち / 反発確認待ち";
+  }
+
+  // scoreDiff が20点ちょうどの時に「20点未満」と書かれた場合だけ、矛盾を解消する。
+  if (diff === 20) {
+    ["summary", "risk", "entryTrigger", "entryPlan", "cancelCondition", "takeProfitPlan", "stopPlan"].forEach((key) => {
+      if (next[key]) {
+        next[key] = String(next[key])
+          .replace(/LONG\/SHORTの点差は20点未満で方向優位性はやや限定的/g, "LONG/SHORTの点差は20点で、方向優位性はあるが強くはない")
+          .replace(/LONG\/SHORTの点差は20点未満/g, "LONG/SHORTの点差は20点")
+          .replace(/点差は20点未満/g, "点差は20点");
+      }
+    });
+    if (Array.isArray(next.riskAlerts)) next.riskAlerts = next.riskAlerts.map((v) => String(v)
+      .replace(/LONG\/SHORTの点差は20点未満で方向優位性はやや限定的/g, "LONG/SHORTの点差は20点で、方向優位性はあるが強くはない")
+      .replace(/LONG\/SHORTの点差は20点未満/g, "LONG/SHORTの点差は20点")
+      .replace(/点差は20点未満/g, "点差は20点"));
+  }
+
+  return next;
 }
 
 function normalizeServerResult(result, mode = "USDJPY") {
@@ -1258,7 +1326,7 @@ function normalizeServerResult(result, mode = "USDJPY") {
 
   if (Array.isArray(next.reasons)) next.reasons = next.reasons.map((v) => polishUsdShortModeText(sanitizeDirectionWords(v)));
 
-  return next;
+  return polishUsdWaitWordingResult(next);
 }
 
 function buildPrompt(mode, pair) {

@@ -168,6 +168,12 @@ function sanitizeMacdWords(text) {
     .replace(/付近\s*付近/g, "付近")
     .replace(/RSIの数値が70を超えておらず、過熱感はまだない/g, "1分RSIは70未満で買われ過ぎではないが、直近上昇後のため現在値からの追い買いは避けたい")
     .replace(/RSIが70未満で過熱感はまだない/g, "1分RSIは70未満で買われ過ぎではないが、直近上昇後のため現在値からの追い買いは避けたい")
+    .replace(/1分(?:足)?RSIは([0-9]{1,2}(?:\.[0-9]+)?)でやや強く買われ過ぎ圏ではないが追い買い注意圏/g, "1分足RSIは$1でやや高く、現在値からは追い買いせず押し目を待ちたい位置")
+    .replace(/1分(?:足)?RSIは([0-9]{1,2}(?:\.[0-9]+)?)でやや強い買い圧力があり、?追い買い注意圏内/g, "1分足RSIは$1でやや高く、現在値からは追い買いせず押し目を待ちたい位置")
+    .replace(/1分(?:足)?RSIは([0-9]{1,2}(?:\.[0-9]+)?)でやや強く[^。\n]*追い買い注意[^。\n]*/g, "1分足RSIは$1でやや高く、現在値からは追い買いせず押し目を待ちたい位置")
+    .replace(/LONG\/SHORTの点差は20点未満で方向優位性はやや限定的/g, "LONG/SHORTの点差は20点で、方向優位性はあるが強くはない")
+    .replace(/LONG\/SHORTの点差は20点未満/g, "LONG/SHORTの点差は20点")
+    .replace(/点差は20点未満/g, "点差は20点")
     .replace(/過熱感はまだない/g, "買われ過ぎではないが、現在値からの追い買いは避けたい");
 }
 
@@ -895,6 +901,43 @@ function normalizeFxResult(aiResult, mode) {
       "反発確定前の成行ロングは禁止",
       "5分足・15分足の方向が揃うまでは方向待ち",
     ];
+  }
+
+  next = normalizeTextFields(next);
+
+  const finalDiff = Math.abs(longScore - shortScore);
+  const isWaitDecision = String(decision || "").trim().toUpperCase() === "WAIT" || String(decision || "").trim() === "待ち";
+  if (mode === "USDJPY" && isWaitDecision) {
+    if (longScore - shortScore >= 20) {
+      decision = "ロング寄り";
+      state = "押し目買い待ち / 反発確認待ち";
+      next.entryStatus = "WAIT";
+    } else if (shortScore - longScore >= 20) {
+      decision = "ショート寄り";
+      state = "戻り売り待ち / 反落確認待ち";
+      next.entryStatus = "WAIT";
+    } else {
+      decision = "見送り";
+      state = state && state !== "待ち" ? state : "方向待ち";
+      next.entryStatus = "WAIT";
+    }
+  }
+
+  if (mode === "USDJPY" && longScore - shortScore >= 20 && String(state || "").includes("方向待ち")) {
+    state = "押し目買い待ち / 反発確認待ち";
+  }
+
+  if (mode === "USDJPY" && finalDiff === 20) {
+    ["summary", "risk", "entryTrigger", "entryPlan", "cancelCondition", "takeProfitPlan", "stopPlan"].forEach((key) => {
+      if (next[key]) next[key] = String(next[key])
+        .replace(/LONG\/SHORTの点差は20点未満で方向優位性はやや限定的/g, "LONG/SHORTの点差は20点で、方向優位性はあるが強くはない")
+        .replace(/LONG\/SHORTの点差は20点未満/g, "LONG/SHORTの点差は20点")
+        .replace(/点差は20点未満/g, "点差は20点");
+    });
+    if (Array.isArray(next.riskAlerts)) next.riskAlerts = next.riskAlerts.map((v) => String(v)
+      .replace(/LONG\/SHORTの点差は20点未満で方向優位性はやや限定的/g, "LONG/SHORTの点差は20点で、方向優位性はあるが強くはない")
+      .replace(/LONG\/SHORTの点差は20点未満/g, "LONG/SHORTの点差は20点")
+      .replace(/点差は20点未満/g, "点差は20点"));
   }
 
   return {
