@@ -307,6 +307,9 @@ function polishMxnTimeframeText(text) {
     .replace(/短期RSIは未確認を維持/g, "")
     .replace(/短期RSIは未確認\s*$/g, "")
     .replace(/短期足下向き継続/g, "短期足が下向き継続")
+    .replace(/短期はややショート寄り/g, "短期は下向きで下落リスクが残る")
+    .replace(/短期ショート寄り/g, "短期は下落リスクが残る")
+    .replace(/ややショート寄り/g, "下落リスクが残る")
     .replace(/\+\s*。/g, "。")
     .replace(/、\s*する場合/g, "する場合")
     .replace(/、\s*場合/g, "場合")
@@ -1058,13 +1061,32 @@ function deriveSkipReasons({ normalizedAiResult, result, riskAlerts }) {
   return [...new Set(reasons)].slice(0, 5);
 }
 
-function deriveEntryHighlights({ normalizedAiResult, entryCard, result }) {
+function deriveEntryHighlights({ normalizedAiResult, entryCard, result, mode }) {
   if (!normalizedAiResult) return [];
 
   const entryText = entryCard?.entryTrigger || "";
   const ranges = extractPriceRanges(entryText, 3);
   const direction = String(result?.direction || normalizedAiResult?.decision || "");
   const cards = [];
+  const isMxn = mode === "MXNJPY";
+
+  if (isMxn) {
+    cards.push({
+      title: "ロング第一候補",
+      price: ranges[0] || "現在値付近の押し目",
+      condition: "下げ止まり確認",
+      confirm: "短期足の陽線確定 / EMA帯回復",
+    });
+    if (ranges[1]) {
+      cards.push({
+        title: "ロング第二候補",
+        price: ranges[1],
+        condition: "買サマリ回復後に維持",
+        confirm: "短期足の陽線確定 / 15分足の下落鈍化",
+      });
+    }
+    return cards.slice(0, 3);
+  }
 
   if (direction.includes("ショート") || entryText.includes("ショート")) {
     cards.push({
@@ -1349,8 +1371,8 @@ ${normalized.stopPlan || ""}`
   );
 
   const entryHighlights = useMemo(
-    () => deriveEntryHighlights({ normalizedAiResult, entryCard, result }),
-    [normalizedAiResult, entryCard, result]
+    () => deriveEntryHighlights({ normalizedAiResult, entryCard, result, mode }),
+    [normalizedAiResult, entryCard, result, mode]
   );
 
   const chatCopyText = useMemo(() => {
