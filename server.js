@@ -62,6 +62,8 @@ function sanitizeDirectionWords(text) {
     .replace(/赤縮小/g, "上昇の勢いがやや鈍化")
     .replace(/赤\s*\//g, "上向き/")
     .replace(/青\s*\//g, "下向き/")
+    .replace(/5分MACDの下向き傾向下向き継続、1分RSIが50を下回りEMA回復失敗の場合/g, "5分MACDが下向き継続し、1分RSIが50を下回り、EMA回復に失敗する場合")
+    .replace(/5分MACDの下向き継続、1分RSIが50を下回りEMA回復失敗の場合/g, "5分MACDが下向き継続し、1分RSIが50を下回り、EMA回復に失敗する場合")
     .replace(/付近付近/g, "付近")
     .replace(/近辺付近/g, "近辺")
     .replace(/付近近辺/g, "付近")
@@ -77,6 +79,7 @@ function sanitizeDirectionWords(text) {
     .replace(/上向き傾向上向き転換/g, "上向き転換")
     .replace(/上向き傾向に上向き転換/g, "上向き転換")
     .replace(/下向き傾向に転換し下向き/g, "下向き転換")
+    .replace(/下向き傾向下向き継続/g, "下向き継続")
     .replace(/下向き傾向下向き転換/g, "下向き転換")
     .replace(/下向き傾向に下向き転換/g, "下向き転換")
     .replace(/上向き転換し上向き転換気味/g, "上向き転換気味")
@@ -397,22 +400,22 @@ function buildMxnScoreState(levels) {
 
 function buildMxnEntryTextFromLevels(levels) {
   if (!levels) return "新規成行禁止。現在値と買サマリが確認できるまで見送り。";
-  return `新規成行禁止。\nロング候補：\n${levels.longZone}付近で下げ止まり、短期足の陽線確定またはEMA帯回復を確認できる場合のみ検討。\n回復確認候補：\n${levels.recoveryZone}付近を回復し、買サマリ上で維持できる場合は反発確認後のロングを検討。\nショート候補：\nスワップ押し目モードでは優先度低め。${levels.shortZone}付近まで戻した後、上値が重くなり、短期足が再び下向きへ失速する場合のみ短期調整狙いとして検討。`;
+  return `新規成行禁止。\nロング候補：\n${levels.longZone}付近で下げ止まり、短期足の陽線確定またはEMA帯回復を確認できる場合のみ検討。\n回復確認候補：\n${levels.recoveryZone}付近を回復し、買サマリ上で維持できる場合は反発確認後のロングを検討。\n見送り条件：\n買サマリを大きく下回ったまま短期足が下向き継続する場合は、ロングせず見送り。`;
 }
 
 function buildMxnCancelTextFromLevels(levels) {
   if (!levels) return "現在値と買サマリが確認できるまで見送り。";
-  return `ロング候補取消：\n${levels.longSl1}を明確に下抜け、さらに${levels.longSl2}を割り込む場合。または短期足がEMA帯を回復できず、下向き継続となる場合。\nショート候補取消：\n${levels.shortSl1}を明確に上抜け、さらに${levels.shortSl2}を上抜ける場合。または短期足がEMA帯を回復し、15分足MACDの下向きが鈍化する場合。`;
+  return `ロング候補取消：\n${levels.longSl1}を明確に下抜け、さらに${levels.longSl2}を割り込む場合。または短期足がEMA帯を回復できず、下向き継続となる場合。\n見送り継続：\n買サマリを回復できず、短期足の下向きが続く場合。`;
 }
 
 function buildMxnTakeProfitTextFromLevels(levels) {
   if (!levels) return "TPは現在値と買サマリ確認後に再計算。";
-  return `ロング時：\nTP1：${levels.longTp1}付近\nTP2：${levels.longTp2}付近\n伸びた場合：${levels.longTp3}付近\n\nショート時：\nTP1：${levels.shortTp1}付近\nTP2：${levels.shortTp2}付近\n伸びた場合：${levels.shortTp3}付近\n\nRR目安：\nTP1は短期利確候補。反発/反落が強く、短期足の方向が維持される場合のみTP2以降を検討。`;
+  return `ロング時：\nTP1：${levels.longTp1}付近\nTP2：${levels.longTp2}付近\n伸びた場合：${levels.longTp3}付近\n\nRR目安：\nTP1は短期利確候補。反発が強く、短期足の方向が維持される場合のみTP2以降を検討。`;
 }
 
 function buildMxnStopTextFromLevels(levels) {
   if (!levels) return "STOPは現在値と買サマリ確認後に再計算。";
-  return `ロング時：\n第一SL：${levels.longSl1}割れ\n深めSL：${levels.longSl2}割れ\n撤退条件：短期足が下向き継続し、EMA帯を回復できない場合。\n\nショート時：\n第一SL：${levels.shortSl1}上抜け\n深めSL：${levels.shortSl2}上抜け\n撤退条件：短期足が上向き転換し、EMA帯を回復した場合。`;
+  return `ロング時：\n第一SL：${levels.longSl1}割れ\n深めSL：${levels.longSl2}割れ\n撤退条件：短期足が下向き継続し、EMA帯を回復できない場合。`;
 }
 
 function buildMxnRiskAlertsFromLevels(levels) {
@@ -677,6 +680,24 @@ ${formatPrice(firstLow)}〜${formatPrice(firstHigh)}付近まで押して、1分
 ${formatPrice(second)}付近まで押しても、5分・15分MACDの上向き基調が崩れず、1分RSI40〜50から反発する場合に検討。
 ショート候補：
 優先度は低め。${formatPrice(shortLow)}〜${formatPrice(shortHigh)}付近まで上昇後、上値が重くなり、1分RSIが70付近から反落し、5分MACDが下向き転換する場合のみ短期調整狙いとして検討。`;
+}
+
+
+function buildHighRsiTakeProfitText(result) {
+  const current = estimateUsdCurrentPrice(result);
+  if (!current) return result?.takeProfitPlan || "";
+  return `ロング時：
+TP1：${formatPrice(current + 0.021)}付近
+TP2：${formatPrice(current + 0.041)}付近
+伸びた場合：${formatPrice(current + 0.071)}付近
+
+ショート時：
+TP1：${formatPrice(current - 0.004)}付近
+TP2：${formatPrice(current - 0.024)}付近
+伸びた場合：${formatPrice(current - 0.044)}付近
+
+RR目安：
+TP1は短期利確候補。反発/反落が強く、5分足の方向が維持される場合のみTP2以降を検討。`;
 }
 
 function hasAnyText(text, words) {
@@ -949,11 +970,14 @@ function polishUsdShortModeText(text) {
     .replace(/1時間足は上昇基調があり/g, "1時間足は反発基調だが、上昇継続の確認はまだ必要で")
     .replace(/1時間足は上昇基調/g, "1時間足は反発基調")
     .replace(/上向き傾向に転換し上向き/g, "上向き転換気味")
+    .replace(/下向き傾向下向き継続/g, "下向き継続")
     .replace(/下向き傾向下向き転換/g, "下向き転換")
     .replace(/上向き傾向上向き転換/g, "上向き転換")
     .replace(/上向き転換し上向き/g, "上向き転換気味")
     .replace(/下向き転換し下向き/g, "下向き転換")
     .replace(/MACDは上向き傾向に転換し上向き/g, "MACDは上向き転換気味")
+    .replace(/MACDの下向き傾向下向き継続/g, "MACDが下向き継続")
+    .replace(/MACDが下向き傾向下向き継続/g, "MACDが下向き継続")
     .replace(/MACDが下向き傾向下向き転換/g, "MACDが下向き転換")
     .replace(/MACDが上向き傾向上向き転換/g, "MACDが上向き転換")
     .replace(/RR目安[:：][^\n]*(?:\n)?RR目安[:：]/g, "RR目安:")
@@ -1093,6 +1117,7 @@ function normalizeServerResult(result, mode = "USDJPY") {
       "5分足MACDは上向き転換気味だが、勢いはまだやや限定的",
       rsi != null ? `1分足RSIは${rsi}でやや高く、追い買いは避けたい` : "1分足RSIはやや高く、追い買いは避けたい",
     ];
+    next.takeProfitPlan = buildHighRsiTakeProfitText(next);
     const fixedHighRsi = normalizeUsdHighRsiShortSide(next);
     next.cancelCondition = fixedHighRsi.cancelCondition;
     next.stopPlan = fixedHighRsi.stopPlan;
@@ -1154,6 +1179,7 @@ function normalizeServerResult(result, mode = "USDJPY") {
   }
 
   if (usdRsiZone != null && usdRsiZone >= 65 && usdRsiZone < 70 && String(next.decision || "").includes("ロング")) {
+    next.takeProfitPlan = normalizeTakeProfitText(polishUsdShortModeText(sanitizeDirectionWords(buildHighRsiTakeProfitText(next))));
     const fixed = normalizeUsdHighRsiShortSide(next);
     next.cancelCondition = polishUsdShortModeText(sanitizeDirectionWords(fixed.cancelCondition));
     next.stopPlan = polishUsdShortModeText(sanitizeDirectionWords(fixed.stopPlan));
@@ -1219,7 +1245,9 @@ function buildPrompt(mode, pair) {
 - 81〜100点: 強く優勢
 - 点数差が10点未満なら decision は WAIT
 - longScore が75点以上かつ shortScore より20点以上高いときだけ ENTRY_OK
+- shortScore はショートエントリー点ではなく「今ロングする下落リスク」として扱う
 - shortScore が高い場合でも、基本はショート推奨ではなく「ロング見送り/危険」と表現する
+- MXNJPYではショート候補・ショートTP・ショートSTOPは表示しない
 
 
 追いかけ禁止・戻り売り/押し目待ちルール:
@@ -1230,8 +1258,8 @@ function buildPrompt(mode, pair) {
 - 方向がショート優勢でも、追い売りになる場合は entryStatus を WAIT にする
 - 方向がロング優勢でも、追い買いになる場合は entryStatus を WAIT にする
 - entryTrigger には「今すぐ入る」ではなく、戻り売り/押し目買いの候補価格帯と確認条件を書く
-- ショート優勢なら「〇〇付近への戻り → 1分RSI50〜60から反落 → 陰線確定」などを書く
-- ロング優勢なら「〇〇付近への押し → 1分RSI40〜50から反発 → 陽線確定」などを書く
+- MXNJPYではショートエントリー候補は書かず、下落方向の情報は「見送り条件」や危険条件として書く
+- ロング優勢なら「〇〇付近への押し → 短期足の下げ止まり → 陽線確定」などを書く
 - 直近安値・直近高値・EMA帯・キリ番を使って候補価格をできるだけ具体的に書く
 - takeProfitPlan には具体的なTP候補を価格で書く
 - stopPlan には具体的なSL候補を価格で書く
@@ -2168,8 +2196,8 @@ USDJPY短期モードの価格アンカールール:
 - 方向がショート優勢でも、追い売りになる場合は entryStatus を WAIT にする
 - 方向がロング優勢でも、追い買いになる場合は entryStatus を WAIT にする
 - entryTrigger には「今すぐ入る」ではなく、戻り売り/押し目買いの候補価格帯と確認条件を書く
-- ショート優勢なら「〇〇付近への戻り → 1分RSI50〜60から反落 → 陰線確定」などを書く
-- ロング優勢なら「〇〇付近への押し → 1分RSI40〜50から反発 → 陽線確定」などを書く
+- MXNJPYではショートエントリー候補は書かず、下落方向の情報は「見送り条件」や危険条件として書く
+- ロング優勢なら「〇〇付近への押し → 短期足の下げ止まり → 陽線確定」などを書く
 - 直近安値・直近高値・EMA帯・キリ番を使って候補価格をできるだけ具体的に書く
 - takeProfitPlan には具体的なTP候補を価格で書く
 - stopPlan には具体的なSL候補を価格で書く

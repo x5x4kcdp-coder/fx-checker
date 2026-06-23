@@ -158,6 +158,9 @@ function sanitizeMacdWords(text) {
     .replace(/MACD青/g, "MACD下向き")
     .replace(/赤\s*\//g, "上向き/")
     .replace(/青\s*\//g, "下向き/")
+    .replace(/5分MACDの下向き傾向下向き継続、1分RSIが50を下回りEMA回復失敗の場合/g, "5分MACDが下向き継続し、1分RSIが50を下回り、EMA回復に失敗する場合")
+    .replace(/5分MACDの下向き継続、1分RSIが50を下回りEMA回復失敗の場合/g, "5分MACDが下向き継続し、1分RSIが50を下回り、EMA回復に失敗する場合")
+    .replace(/下向き傾向下向き継続/g, "下向き継続")
     .replace(/付近付近/g, "付近")
     .replace(/近辺付近/g, "近辺")
     .replace(/付近近辺/g, "付近")
@@ -1174,6 +1177,7 @@ function buildDisplayResult({ normalizedAiResult, answers, mode }) {
 function App() {
   const [mode, setMode] = useState("USDJPY");
   const currentMode = MODES[mode];
+  const shortScoreLabel = mode === "MXNJPY" ? "下落リスク" : "SHORT";
 
   const [images, setImages] = useState([null, null, null, null]);
   const [files, setFiles] = useState([null, null, null, null]);
@@ -1259,7 +1263,7 @@ function App() {
         `モード: ${currentMode.name}
 AI判定: ${normalized.decision}
 ステータス: ${normalized.entryStatus}
-LONG: ${normalized.longScore}点 / SHORT: ${normalized.shortScore}点
+LONG: ${normalized.longScore}点 / ${shortScoreLabel}: ${normalized.shortScore}点
 信頼度: ${normalized.confidence}
 
 理由:
@@ -1357,7 +1361,7 @@ ${normalized.stopPlan || ""}`
 判定：${result.direction}
 状態：${result.statusText}
 LONG：${result.long}点
-SHORT：${result.short}点
+${shortScoreLabel}：${result.short}点
 差：${result.diff}点
 信頼度：${normalizedAiResult.confidence ?? "-"}点
 
@@ -1381,7 +1385,7 @@ ${entryCard.stopPlan}
 
 AI理由：
 ${(normalizedAiResult.reasons || []).map((r) => `・${r}`).join("\n")}`;
-  }, [normalizedAiResult, currentMode.name, result, riskAlerts, entryCard]);
+  }, [normalizedAiResult, currentMode.name, shortScoreLabel, result, riskAlerts, entryCard]);
 
   const copyForChat = async () => {
     if (!chatCopyText) return;
@@ -1463,7 +1467,7 @@ ${(normalizedAiResult.reasons || []).map((r) => `・${r}`).join("\n")}`;
 
         <div className="scoreBox scoreRow">
           <div className="score scoreCard longScore"><span>LONG</span><b>{result.long}点</b></div>
-          <div className="score scoreCard shortScore"><span>SHORT</span><b>{result.short}点</b></div>
+          <div className="score scoreCard shortScore"><span>{shortScoreLabel}</span><b>{result.short}点</b></div>
           <div className="diff scoreCard"><span>差</span><b>{result.diff}点</b></div>
         </div>
       </section>
