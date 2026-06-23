@@ -42,6 +42,10 @@ function sanitizeDirectionWords(text) {
     .replace(/青継続/g, "下向き継続")
     .replace(/MACD赤/g, "MACD上向き")
     .replace(/MACD青/g, "MACD下向き")
+    .replace(/青縮小気味/g, "下落の勢いがやや鈍化")
+    .replace(/青縮小/g, "下落の勢いがやや鈍化")
+    .replace(/赤縮小気味/g, "上昇の勢いがやや鈍化")
+    .replace(/赤縮小/g, "上昇の勢いがやや鈍化")
     .replace(/赤\s*\//g, "上向き/")
     .replace(/青\s*\//g, "下向き/")
     .replace(/付近付近/g, "付近")
@@ -401,6 +405,99 @@ function buildMxnRiskAlertsFromLevels(levels) {
     third,
   ];
 }
+
+function polishMxnNarrativeTone(text, levels = null, scoreState = null) {
+  if (!text) return text;
+  const shortDominant = Number(scoreState?.short || 0) > Number(scoreState?.long || 0);
+  let value = String(text);
+
+  value = sanitizeDirectionWords(value)
+    .replace(/方向はロング優勢だが押し目確認待ち。?/g, "日足のロング背景は残るが、短期は弱く、現在は反発確認待ち。")
+    .replace(/方向はロング優勢だが押し目買い待ち。?/g, "日足のロング背景は残るが、短期は弱く、現在は反発確認待ち。")
+    .replace(/ロング優勢だが押し目確認待ち/g, "ロング背景は残るが反発確認待ち")
+    .replace(/ロング優勢だが押し目買い待ち/g, "ロング背景は残るが反発確認待ち")
+    .replace(/1時間足・日足にはロング背景があり/g, "日足にはロング背景が残るが、1時間足は反発確認前で")
+    .replace(/1時間足にはロング背景があり/g, "1時間足は反発確認前で")
+    .replace(/1時間足にはロング背景が残るが/g, "1時間足は反発確認前で")
+    .replace(/1時間足にロング背景はあるが/g, "1時間足は反発確認前で")
+    .replace(/1時間足にロング背景があり/g, "1時間足は反発確認前で")
+    .replace(/1時間足は上昇背景があるが/g, "1時間足は反発確認前で")
+    .replace(/1時間足は上昇背景があり/g, "1時間足は反発確認前で")
+    .replace(/1時間足MACDは弱いが下げ止まり気配があり短期ロング加点材料/g, "1時間足は下向きで、短期はややショート寄り")
+    .replace(/短期足は底打ちの兆候があり/g, "短期足は下向きだが、下落の勢いはやや鈍化しており")
+    .replace(/底打ちの兆候/g, "下落の勢いの鈍化")
+    .replace(/短期押し目強化と見る/g, "短期の反発確認はまだ不足")
+    .replace(/短期ロング加点/g, "反発確認待ち")
+    .replace(/短期ロング加点材料/g, "反発確認待ち材料")
+    .replace(/日足EMAは3本とも上向きで上昇基調。?/g, "日足では上昇背景が残る。")
+    .replace(/日足EMAは上抜け維持/g, "日足ではEMA帯を上回っており、上位足のロング背景は残る")
+    .replace(/日足MACDはまだ上向き基調でロング加点/g, "日足では上昇背景が残る")
+    .replace(/4時間足はEMA割れやMACD上向き転換直後で調整局面だが、日足押し目と判断可能。?/g, "4時間足は買サマリを下回り、反発確認はまだ不足。")
+    .replace(/4時間足MACDは上向き転換で押し目調整状態だが安値は更新せず/g, "4時間足は下落後の調整局面で、買サマリ回復まではロング判断を急がない")
+    .replace(/4時間足はMACDが下向き傾向で下落継続し押し目弱く短期ショート寄り/g, "4時間足は買サマリを下回り、反発確認はまだ不足")
+    .replace(/4時間足はMACD下向き継続中で警戒が必要/g, "4時間足は買サマリを下回り、反発確認はまだ不足")
+    .replace(/4時間足は[^。]*買サマリ[^。]*反発期待[^。]*。?/g, "4時間足は買サマリを下回り、反発確認はまだ不足。")
+    .replace(/4時間足は[^。]*MACD[^。]*上向き転換[^。]*。?/g, "4時間足は下落後の調整局面で、買サマリ回復まではロング判断を急がない。")
+    .replace(/短期足は下落の勢いがやや鈍化し下落鈍化中/g, "短期足は下向きだが、下落の勢いはやや鈍化")
+    .replace(/下落の勢いがやや鈍化し下落鈍化中/g, "下落の勢いはやや鈍化")
+    .replace(/下落の勢いがやや鈍化中/g, "下落の勢いはやや鈍化")
+    .replace(/成行ロングは禁止方向/g, "成行ロングは禁止。方向")
+    .replace(/禁止方向/g, "禁止。方向")
+    .replace(/短期RSIは未確認のため反発確認前/g, "短期RSIは未確認のため、反発確認前")
+    .replace(/。\s*現在値/g, "。 現在値")
+    .replace(/。\s*短期RSI/g, "。 短期RSI")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (shortDominant) {
+    value = value
+      .replace(/方向はロング優勢/g, "日足のロング背景は残るが、短期は弱い")
+      .replace(/ロング優勢/g, "ロング背景は残るが短期は弱い")
+      .replace(/短期はロング寄り/g, "短期はややショート寄り")
+      .replace(/方向はロング寄り/g, "上位足のロング背景は残るが短期は弱い");
+  }
+
+  return value
+    .replace(/。\s*。/g, "。")
+    .replace(/、\s*、/g, "、")
+    .trim();
+}
+
+function buildMxnSummaryFromLevels(levels, scoreState) {
+  if (!levels) return null;
+  if (levels.deepBelowBuySummary || Number(scoreState?.short || 0) > Number(scoreState?.long || 0)) {
+    return `日足には上昇背景が残るが、4時間足・1時間足・短期足は下向きで、買サマリ${levels.buySummary}付近を大きく下回っている。現在値は${levels.currentPrice}付近で、短期はややショート寄り。ただしMXNJPYスワップ押し目モードではショート優先ではなく、反発確認待ちが妥当。短期RSIは未確認のため断定せず、短期足の下げ止まり・陽線確定・EMA帯回復を待つ場面。`;
+  }
+  if (levels.shallowBelowBuySummary) {
+    return `日足には上昇背景が残るが、4時間足・1時間足・短期足は調整中で、買サマリ${levels.buySummary}付近をまだ回復できていない。現在値は${levels.currentPrice}付近で、短期の反発確認はまだ不足。短期RSIは未確認のため断定せず、短期足の下げ止まり・陽線確定・EMA帯回復を待つ場面。`;
+  }
+  return `日足には上昇背景が残り、現在値は${levels.currentPrice}付近で買サマリ${levels.buySummary}付近を回復しつつある。ただし短期足の反発確認はまだ不足しており、成行ロングは避けたい。短期RSIは未確認のため断定せず、短期足の下げ止まり・陽線確定・EMA帯回復を待つ場面。`;
+}
+
+function buildMxnReasonsFromLevels(levels, scoreState) {
+  if (!levels) {
+    return [
+      "日足では上昇背景が残る",
+      "4時間足・1時間足は調整中で短期反発は未確定",
+      "短期RSIは画像に無いため未確認",
+    ];
+  }
+  if (levels.deepBelowBuySummary || Number(scoreState?.short || 0) > Number(scoreState?.long || 0)) {
+    return [
+      "日足では上昇背景が残る",
+      "4時間足は買サマリを下回り、反発確認はまだ不足",
+      "1時間足は下向きで、短期はややショート寄り",
+      "短期足は下向きだが、下落の勢いはやや鈍化",
+      "短期RSIは未確認のため、反発確認前の成行ロングは禁止",
+    ];
+  }
+  return [
+    "日足では上昇背景が残る",
+    "4時間足・1時間足は調整中で、短期の反発確認はまだ不足",
+    "短期足は下向きだが、下落の勢いはやや鈍化",
+    "短期RSIは未確認のため、反発確認前の成行ロングは禁止",
+  ];
+}
 function polishMxnTimeframeText(text) {
   if (!text) return text;
   return String(text)
@@ -455,16 +552,19 @@ function normalizeMxnSwapResult(result) {
   next.shortScore = scoreState.short;
   next.confidence = scoreState.confidence;
 
-  const currentLine = levels
-    ? `現在値は${levels.currentPrice}付近、買サマリは${levels.buySummary}付近。`
-    : "現在値と買サマリを確認し、短期足の反発を待つ場面。";
-  const baseSummary = String(next.summary || "").trim();
-  const rsiLine = /短期RSIは未確認/.test(baseSummary)
-    ? ""
-    : "短期RSIは未確認のため断定せず、";
-  next.summary = polishMxnTimeframeText(
-    `${baseSummary ? baseSummary + " " : ""}${currentLine} ${rsiLine}短期足の下げ止まり・陽線確定・EMA帯回復を待つ場面。`
-  ).trim();
+  const dynamicSummary = buildMxnSummaryFromLevels(levels, scoreState);
+  if (dynamicSummary) {
+    next.summary = polishMxnTimeframeText(polishMxnNarrativeTone(dynamicSummary, levels, scoreState)).trim();
+  } else {
+    const currentLine = "現在値と買サマリを確認し、短期足の反発を待つ場面。";
+    const baseSummary = polishMxnNarrativeTone(String(next.summary || "").trim(), levels, scoreState);
+    const rsiLine = /短期RSIは未確認/.test(baseSummary)
+      ? ""
+      : "短期RSIは未確認のため断定せず、";
+    next.summary = polishMxnTimeframeText(
+      `${baseSummary ? baseSummary + " " : ""}${currentLine} ${rsiLine}短期足の下げ止まり・陽線確定・EMA帯回復を待つ場面。`
+    ).trim();
+  }
 
   next.entryTrigger = buildMxnEntryTextFromLevels(levels);
   next.cancelCondition = buildMxnCancelTextFromLevels(levels);
@@ -473,13 +573,8 @@ function normalizeMxnSwapResult(result) {
   next.riskAlerts = buildMxnRiskAlertsFromLevels(levels);
   next.risk = next.riskAlerts.join("\n");
 
-  if (!Array.isArray(next.reasons) || next.reasons.length === 0) {
-    next.reasons = [
-      "日足には上昇背景が残る",
-      "4時間足・1時間足は調整中で短期反発は未確定",
-      "短期RSIは画像に無いため未確認",
-    ];
-  }
+  next.reasons = buildMxnReasonsFromLevels(levels, scoreState)
+    .map((v) => polishMxnTimeframeText(polishMxnNarrativeTone(v, levels, scoreState)));
 
   return next;
 }
