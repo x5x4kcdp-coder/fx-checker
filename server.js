@@ -562,6 +562,36 @@ function applyMxnDeepPullbackOverride(next) {
     ];
 
     if (typeof deepPatchMxnV24Object === "function") deepPatchMxnV24Object(next);
+
+    // MXN 9.243 final re-apply
+    // deepPatchMxnV24Object が古い9.258台のENTRY/TP/STOPを戻す場合があるため、
+    // 9.243台ブランチでは最後に必ず最新価格帯を再上書きする。
+    next.state = "深押し継続警戒 / 反発確認待ち";
+
+    next.entryTrigger = entryText;
+    next.entryPlan = entryText;
+    next.entry = entryText;
+
+    next.cancelCondition = cancelText;
+    next.cancelPlan = cancelText;
+    next.cancel = cancelText;
+
+    next.takeProfitPlan = tpText;
+    next.takeProfit = tpText;
+    next.tpPlan = tpText;
+    next.tp = tpText;
+
+    next.stopPlan = stopText;
+    next.stopLossPlan = stopText;
+    next.stop = stopText;
+
+    next.riskAlerts = [
+      "短期RSIは未確認のため、反発確認前の成行ロングは禁止",
+      "買サマリ9.258付近を下抜けており、短期足の反発確認はまだ未確定",
+      "9.235付近を明確に下抜けると深押し継続に注意",
+    ];
+    next.risk = next.riskAlerts.join("\n");
+
     return next;
   }
 
