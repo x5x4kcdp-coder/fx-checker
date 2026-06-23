@@ -1336,8 +1336,9 @@ function applyMxnFinalHardOverrideV24(next) {
 
   return next;
 }
-\nfunction normalizeServerResult(result, mode = "USDJPY") {
-  if (mode === "MXNJPY") return applyMxnBelowBuySummaryOverrideV21(normalizeMxnSwapResult(result));
+
+function normalizeServerResult(result, mode = "USDJPY") {
+  if (mode === "MXNJPY") return applyMxnFinalHardOverrideV24(normalizeMxnSwapResult(result));
 
   const next = { ...result };
 
@@ -3561,6 +3562,8 @@ const PORT = process.env.PORT || 8787;
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`AI server running: http://0.0.0.0:${PORT}`);
 });
+
+
 
 
 
