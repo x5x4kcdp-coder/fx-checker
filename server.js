@@ -620,6 +620,7 @@ function normalizeMxnSwapResult(result) {
       "撤退条件：短期足が上向き転換し、EMA帯を回復した場合。";
   }
 
+  applyMxnBelowBuySummaryOverrideV21(next);
   return next;
 }
 
@@ -1041,7 +1042,7 @@ function applyMxnDeepPullbackOverrideV19Final(next) {
 }
 
 function normalizeServerResult(result, mode = "USDJPY") {
-  if (mode === "MXNJPY") return applyMxnDeepPullbackOverrideV19Final(normalizeMxnSwapResult(result));
+  if (mode === "MXNJPY") return applyMxnBelowBuySummaryOverrideV21(normalizeMxnSwapResult(result));
 
   const next = { ...result };
 
@@ -3265,6 +3266,7 @@ const PORT = process.env.PORT || 8787;
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`AI server running: http://0.0.0.0:${PORT}`);
 });
+
 
 
 
