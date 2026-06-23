@@ -964,7 +964,7 @@ function polishUsdFinalWordingText(text) {
     .replace(/([0-9]{3}\.[0-9]{3})\s*[〜~～]\s*([0-9]{3}\.[0-9]{3})付近への押し目買いで検討/g, "$1〜$2付近で下げ止まり、または同価格帯を回復後に短期EMA上で維持できれば検討");
 }
 function normalizeServerResult(result, mode = "USDJPY") {
-  if (mode === "MXNJPY") return applyMxnDeepPullbackOverride(normalizeMxnSwapResult(result));
+  if (mode === "MXNJPY") return normalizeMxnSwapResult(result);
 
   const next = { ...result };
 
@@ -3188,7 +3188,6 @@ const PORT = process.env.PORT || 8787;
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`AI server running: http://0.0.0.0:${PORT}`);
 });
-
 
 
 
