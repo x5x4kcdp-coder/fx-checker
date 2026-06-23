@@ -22,6 +22,16 @@ function fileToDataUrl(file) {
 }
 
 
+function sortDisplayedPriceRanges(text) {
+  if (!text) return text;
+  return String(text).replace(/\b(\d{1,3}\.\d{2,4})\s*([〜~～])\s*(\d{1,3}\.\d{2,4})\b/g, (match, left, sep, right) => {
+    const a = Number(left);
+    const b = Number(right);
+    if (!Number.isFinite(a) || !Number.isFinite(b) || a <= b) return match;
+    return `${right}${sep}${left}`;
+  });
+}
+
 function sanitizeDirectionWords(text) {
   if (!text) return text;
   return String(text)
@@ -55,8 +65,23 @@ function sanitizeDirectionWords(text) {
     .replace(/付近\s*付近/g, "付近")
     .replace(/RSIの数値が70を超えておらず、過熱感はまだない/g, "1分RSIは70未満で買われ過ぎではないが、直近上昇後のため現在値からの追い買いは避けたい")
     .replace(/RSIが70未満で過熱感はまだない/g, "1分RSIは70未満で買われ過ぎではないが、直近上昇後のため現在値からの追い買いは避けたい")
-    .replace(/過熱感はまだない/g, "買われ過ぎではないが、現在値からの追い買いは避けたい");
+    .replace(/過熱感はまだない/g, "買われ過ぎではないが、現在値からの追い買いは避けたい")
+    .replace(/赤上向き/g, "上向き")
+    .replace(/青下向き/g, "下向き")
+    .replace(/上向き傾向に転換し上向き転換気味/g, "上向き転換気味")
+    .replace(/上向き傾向に転換し上向き/g, "上向き転換気味")
+    .replace(/上向き傾向上向き転換/g, "上向き転換")
+    .replace(/上向き傾向に上向き転換/g, "上向き転換")
+    .replace(/下向き傾向に転換し下向き/g, "下向き転換")
+    .replace(/下向き傾向下向き転換/g, "下向き転換")
+    .replace(/下向き傾向に下向き転換/g, "下向き転換")
+    .replace(/上向き転換し上向き転換気味/g, "上向き転換気味")
+    .replace(/上向き転換し上向き/g, "上向き転換気味")
+    .replace(/下向き転換し下向き/g, "下向き転換")
+    .replace(/上向き基調に転換し上向き/g, "上向き転換気味")
+    .replace(/下向き基調に転換し下向き/g, "下向き転換");
 }
+
 
 
 function sanitizeMxnSwapText(text) {
@@ -631,6 +656,25 @@ function buildMidRsiLongEntryResult(result) {
   return `新規成行禁止。ロング候補: 第一候補は${formatPrice(firstLow)}〜${formatPrice(firstHigh)}付近で下げ止まり、1分RSIが50〜55まで落ち着き、陽線確定した場合。5分MACDが上向き継続し、15分MACDの上向き基調を維持していればロング検討。第二候補は${formatPrice(secondLow)}〜${formatPrice(secondHigh)}付近まで押した場合、15分足の上昇基調が崩れず、1分RSI40〜50から反発したらロング検討。ショート候補: 上位足ロング背景が強いため、ショートは短期逆張り扱い。${formatPrice(shortLow)}〜${formatPrice(shortHigh)}付近で上値が重くなり、1分RSIが60〜70から反落、5分MACDが下向き転換し、陰線確定した場合のみ短期ショート検討。`;
 }
 
+function buildHighRsiLongEntryResult(result) {
+  const current = estimateUsdCurrentPrice(result);
+  if (!current) return null;
+
+  const firstLow = current - 0.015;
+  const firstHigh = current - 0.005;
+  const second = current - 0.035;
+  const shortLow = current + 0.020;
+  const shortHigh = current + 0.035;
+
+  return `新規成行禁止。
+ロング候補：
+${formatPrice(firstLow)}〜${formatPrice(firstHigh)}付近まで押して、1分RSIが50〜55付近へ落ち着き、陽線確定した場合に検討。
+深押し候補：
+${formatPrice(second)}付近まで押しても、5分・15分MACDの上向き基調が崩れず、1分RSI40〜50から反発する場合に検討。
+ショート候補：
+優先度は低め。${formatPrice(shortLow)}〜${formatPrice(shortHigh)}付近まで上昇後、上値が重くなり、1分RSIが70付近から反落し、5分MACDが下向き転換する場合のみ短期調整狙いとして検討。`;
+}
+
 function hasAnyText(text, words) {
   return words.some((word) => String(text || "").includes(word));
 }
@@ -816,11 +860,26 @@ function parseUsdRsiZone(text) {
 
 function polishUsdShortModeText(text) {
   if (!text) return text;
-  return String(text)
+  let value = String(text)
     .replace(/1分足RSIは40台前半/g, "1分RSIは40台前半")
+    .replace(/1時間足MACDは上向きで上昇基調を継続している/g, "1時間足は反発基調だが、上昇継続の確認はまだ必要")
+    .replace(/1時間足MACDは上昇基調でロング加点/g, "1時間足は反発基調でロング材料だが、上昇継続の確認はまだ必要")
+    .replace(/1時間足MACDは上昇基調/g, "1時間足は反発基調")
+    .replace(/1時間足は上昇基調が継続しており/g, "1時間足は反発基調だが、上昇継続の確認はまだ必要で")
+    .replace(/1時間足は上昇基調があり/g, "1時間足は反発基調だが、上昇継続の確認はまだ必要で")
+    .replace(/1時間足は上昇基調/g, "1時間足は反発基調")
+    .replace(/上向き傾向に転換し上向き/g, "上向き転換気味")
+    .replace(/下向き傾向下向き転換/g, "下向き転換")
+    .replace(/上向き傾向上向き転換/g, "上向き転換")
+    .replace(/上向き転換し上向き/g, "上向き転換気味")
+    .replace(/下向き転換し下向き/g, "下向き転換")
+    .replace(/MACDは上向き傾向に転換し上向き/g, "MACDは上向き転換気味")
+    .replace(/MACDが下向き傾向下向き転換/g, "MACDが下向き転換")
+    .replace(/MACDが上向き傾向上向き転換/g, "MACDが上向き転換")
     .replace(/RR目安[:：][^\n]*(?:\n)?RR目安[:：]/g, "RR目安:")
     .replace(/。\s*。/g, "。")
     .replace(/付近付近/g, "付近");
+  return sortDisplayedPriceRanges(value);
 }
 
 function normalizeServerResult(result, mode = "USDJPY") {
@@ -929,6 +988,25 @@ function normalizeServerResult(result, mode = "USDJPY") {
         "1分RSIは70未満で買われ過ぎではないが、直近上昇後のため現在値からの追い買いは避けたい。"
       )));
     }
+  }
+
+  if (
+    hasHigherLong &&
+    String(next.decision || "").includes("ロング") &&
+    rsi != null &&
+    rsi >= 65 &&
+    rsi < 70
+  ) {
+    next.entryStatus = "WAIT";
+    next.state = next.state && next.state !== "待ち" ? next.state : "押し目買い待ち / 反発確認待ち";
+    const highEntry = buildHighRsiLongEntryResult(next);
+    if (highEntry) next.entryTrigger = highEntry;
+    next.summary = "15分足・5分足は上向き基調で、短期はロング寄り。ただし1分RSIは65以上まで上昇しており、現在値からの追い買いは避けたい。1時間足は反発基調だが、上昇継続の確認はまだ必要。ロングは押し目を待ち、短期足の下げ止まりと陽線確定を確認したい場面。";
+    next.riskAlerts = [
+      "1分RSIが60台後半であるため現在値からの追い買いは禁止",
+      "5分足の上昇勢いはやや鈍化気味",
+      "直近高値付近では揉み合いやすい",
+    ];
   }
 
   if (diff < 10) {
