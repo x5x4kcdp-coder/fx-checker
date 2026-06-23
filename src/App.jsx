@@ -1433,7 +1433,8 @@ function patchMxnChatCopyText(value) {
   return s;
 }
 
-\nfunction App() {
+
+function App() {
   const [mode, setMode] = useState("USDJPY");
   const currentMode = MODES[mode];
 
@@ -1642,7 +1643,9 @@ STOP：
 ${entryCard.stopPlan}
 
 AI理由：
-${(normalizedAiResult.reasons || []).map((r) => `・${r}`).join("\n")}`;\n\n    return String(currentMode?.name || "").includes("MXNJPY") ? patchMxnChatCopyText(text) : text;
+${(normalizedAiResult.reasons || []).map((r) => `・${r}`).join("\n")}`;
+
+    return String(currentMode?.name || "").includes("MXNJPY") ? patchMxnChatCopyText(text) : text;
   }, [normalizedAiResult, currentMode.name, result, riskAlerts, entryCard]);
 
   const copyForChat = async () => {
@@ -1884,5 +1887,6 @@ ${(normalizedAiResult.reasons || []).map((r) => `・${r}`).join("\n")}`;\n\n    
 }
 
 export default App;
+
 
 
