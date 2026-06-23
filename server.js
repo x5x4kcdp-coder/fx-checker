@@ -1042,6 +1042,7 @@ function applyMxnDeepPullbackOverrideV19Final(next) {
 }
 
 
+
 function applyMxnBelowBuySummaryOverrideV21(next) {
   if (!next) return next;
 
@@ -1053,36 +1054,46 @@ function applyMxnBelowBuySummaryOverrideV21(next) {
     next.entryTrigger,
     next.entryPlan,
     next.cancelCondition,
+    next.cancelPlan,
     next.takeProfitPlan,
+    next.takeProfit,
+    next.tpPlan,
     next.stopPlan,
+    next.stop,
+    next.stopLossPlan,
     Array.isArray(next.reasons) ? next.reasons.join(" ") : next.reasons,
     Array.isArray(next.riskAlerts) ? next.riskAlerts.join(" ") : next.riskAlerts,
   ].filter(Boolean).join(" ");
 
   const shouldApply =
     String(next.state || "").includes("深押し") ||
-    /9\.290〜9\.295付近で下げ止まり|9\.300〜9\.310付近まで戻した後|買サマリ|買いサマリ|9\.267|9\.258|9\.257|9\.25/.test(allText);
+    /買サマリ|買いサマリ|9\.267|9\.258|9\.257|9\.253|9\.250|9\.290〜9\.295|9\.300〜9\.310/.test(allText);
 
   if (!shouldApply) return next;
 
   next.decision = "見送り";
   next.state = "深押し反発確認待ち";
   next.entryStatus = "WAIT";
+
   next.longScore = 55;
   next.shortScore = 55;
+  next.long = 55;
+  next.short = 55;
   next.confidence = 50;
 
   next.summary =
     "日足にはまだ長期上昇背景が残るが、4時間足・1時間足・15分足は下向きが強い。現在値は9.258付近で、買サマリ9.267付近を下抜けているため、反発確認前のロングは危険。スワップ目的では押し目候補として監視できるが、短期足の下げ止まり・陽線確定・EMA帯回復を待つ場面。短期RSIは未確認のため、成行ロングは禁止。";
 
-  next.riskAlerts = [
+  const riskText = [
     "短期RSIは未確認のため、反発確認前の成行ロングは禁止",
     "買サマリ9.267付近を下抜けており、短期足の反発確認はまだ未確定",
     "9.250付近を明確に下抜けると深押し継続に注意",
   ];
-  next.risk = next.riskAlerts.join("\n");
 
-  next.entryTrigger =
+  next.riskAlerts = riskText;
+  next.risk = riskText.join("\n");
+
+  const entryText =
     "新規成行禁止。\n" +
     "ロング候補：\n" +
     "9.250〜9.260付近で下げ止まり、短期足の陽線確定またはEMA帯回復を確認。そのうえで15分足MACDの下落鈍化、または上向き転換気味の動きが出ればロング検討。\n" +
@@ -1091,13 +1102,21 @@ function applyMxnBelowBuySummaryOverrideV21(next) {
     "ショート候補：\n" +
     "スワップ押し目モードでは優先度低め。9.267〜9.275付近まで戻した後、上値が重くなり、短期足が再び下向きへ失速する場合のみ短期調整狙いとして検討。";
 
-  next.cancelCondition =
+  next.entryTrigger = entryText;
+  next.entryPlan = entryText;
+  next.entry = entryText;
+
+  const cancelText =
     "ロング候補取消：\n" +
     "9.245を明確に下抜け、さらに9.225を割り込む場合。または短期足がEMA帯を回復できず、下向き継続となる場合。\n" +
     "ショート候補取消：\n" +
     "9.275を明確に上抜け、さらに9.295を上抜ける場合。または短期足がEMA帯を回復し、15分足MACDの下向きが鈍化する場合。";
 
-  next.takeProfitPlan =
+  next.cancelCondition = cancelText;
+  next.cancelPlan = cancelText;
+  next.cancel = cancelText;
+
+  const tpText =
     "ロング時：\n" +
     "TP1：9.267付近\n" +
     "TP2：9.285付近\n" +
@@ -1109,7 +1128,12 @@ function applyMxnBelowBuySummaryOverrideV21(next) {
     "RR目安：\n" +
     "TP1は短期利確候補。反発/反落が強く、短期足の方向が維持される場合のみTP2以降を検討。";
 
-  next.stopPlan =
+  next.takeProfitPlan = tpText;
+  next.takeProfit = tpText;
+  next.tpPlan = tpText;
+  next.tp = tpText;
+
+  const stopText =
     "ロング時：\n" +
     "第一SL：9.245割れ\n" +
     "深めSL：9.225割れ\n" +
@@ -1118,6 +1142,10 @@ function applyMxnBelowBuySummaryOverrideV21(next) {
     "第一SL：9.275上抜け\n" +
     "深めSL：9.295上抜け\n" +
     "撤退条件：短期足が上向き転換し、EMA帯を回復した場合。";
+
+  next.stopPlan = stopText;
+  next.stopLossPlan = stopText;
+  next.stop = stopText;
 
   next.reasons = [
     "日足には長期上昇背景が残るが、現在値は買サマリ9.267付近を下回っている",
@@ -1128,6 +1156,7 @@ function applyMxnBelowBuySummaryOverrideV21(next) {
 
   return next;
 }
+
 
 function normalizeServerResult(result, mode = "USDJPY") {
   if (mode === "MXNJPY") return applyMxnBelowBuySummaryOverrideV21(normalizeMxnSwapResult(result));
