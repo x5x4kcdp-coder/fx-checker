@@ -755,13 +755,15 @@ function normalizeTakeProfitText(text) {
     .replace(/TP1は短期利確(?:向き|候補)[^。\n]*。?/g, "")
     .replace(/反発が強く5分足の上向きを維持する場合のみTP2以降を検討。?/g, "")
     .replace(/5分足が上向きを維持する場合のみTP2以降を検討。?/g, "")
-    .replace(/RR目安[:：][^\n]*(?:\n)?/g, "")
+    .replace(/反発\/反落が強く、?5分足の方向が維持される場合のみTP2以降を検討。?/g, "")
+    .replace(/RR目安[:：][\s\S]*$/g, "")
     .replace(/RR目安は[^。\n]*。?/g, "")
     .replace(/TP1が近すぎる場合は[^。]*。?/g, "")
     .replace(/TP2まで狙える形が望ましい。?/g, "")
+    .replace(/\n{3,}/g, "\n\n")
     .trim();
 
-  const rr = "RR目安: TP1は短期利確候補。反発/反落が強く、5分足の方向が維持される場合のみTP2以降を検討。";
+  const rr = "RR目安：\nTP1は短期利確候補。反発/反落が強く、5分足の方向が維持される場合のみTP2以降を検討。";
   return `${value}\n${rr}`.trim();
 }
 
@@ -910,32 +912,43 @@ function extractUsdShortCandidateRange(result) {
   return { low: Math.min(a, b), high: Math.max(a, b) };
 }
 
-function buildUsdShortSideSafetyLevels(result) {
+function getValidatedUsdShortCandidateRange(result) {
   const range = extractUsdShortCandidateRange(result);
-  if (range) {
-    return {
-      cancelLow: range.high,
-      cancelHigh: range.high + 0.010,
-      sl1: range.high + 0.010,
-      sl2: range.high + 0.030,
-    };
-  }
+  if (!range) return null;
+
+  const width = range.high - range.low;
+  if (!Number.isFinite(width) || width <= 0 || width > 0.120) return null;
 
   const current = estimateUsdCurrentPrice(result);
-  if (!current) return null;
+  if (Number.isFinite(current) && Math.abs(range.low - current) > 0.250) return null;
+
+  return range;
+}
+
+function buildUsdShortSideSafetyLevels(result) {
+  const range = getValidatedUsdShortCandidateRange(result);
+  if (!range) return null;
+
   return {
-    cancelLow: current + 0.035,
-    cancelHigh: current + 0.045,
-    sl1: current + 0.045,
-    sl2: current + 0.065,
+    cancelLow: range.high,
+    cancelHigh: range.high + 0.010,
+    sl1: range.high + 0.010,
+    sl2: range.high + 0.030,
   };
 }
 
 function replaceUsdShortCancelText(text, result) {
-  const levels = buildUsdShortSideSafetyLevels(result);
-  if (!levels) return text;
-  const replacement = `ショート候補取消：\n${formatPrice(levels.cancelLow)}〜${formatPrice(levels.cancelHigh)}を明確に上抜け、\nまたは5分MACDが上向き継続し、1分RSIが50以上を維持する場合。`;
   const value = String(text || "");
+  const levels = buildUsdShortSideSafetyLevels(result);
+  if (!levels) {
+    const replacement = "ショート候補取消：\n候補価格確定後に再判断。";
+    if (/ショート候補取消[:：]/.test(value)) {
+      return value.replace(/ショート候補取消[:：][\s\S]*?(?=\n?見送り継続[:：]|$)/, replacement);
+    }
+    return value;
+  }
+
+  const replacement = `ショート候補取消：\n${formatPrice(levels.cancelLow)}〜${formatPrice(levels.cancelHigh)}を明確に上抜け、\nまたは5分MACDが上向き継続し、1分RSIが50以上を維持する場合。`;
   if (/ショート候補取消[:：]/.test(value)) {
     return value.replace(/ショート候補取消[:：][\s\S]*?(?=\n?見送り継続[:：]|$)/, replacement);
   }
@@ -943,10 +956,17 @@ function replaceUsdShortCancelText(text, result) {
 }
 
 function replaceUsdShortStopText(text, result) {
-  const levels = buildUsdShortSideSafetyLevels(result);
-  if (!levels) return text;
-  const replacement = `ショート時：\n第一SL：${formatPrice(levels.sl1)}上抜け\n深めSL：${formatPrice(levels.sl2)}上抜け\n撤退条件：5分MACD上向き継続＋1分RSI50以上でEMA帯を維持する場合。`;
   const value = String(text || "");
+  const levels = buildUsdShortSideSafetyLevels(result);
+  if (!levels) {
+    const replacement = "ショート時：\n候補価格確定後に設定。";
+    if (/ショート時[:：]/.test(value)) {
+      return value.replace(/ショート時[:：][\s\S]*$/, replacement);
+    }
+    return `${value.trim()}\n\n${replacement}`.trim();
+  }
+
+  const replacement = `ショート時：\n第一SL：${formatPrice(levels.sl1)}上抜け\n深めSL：${formatPrice(levels.sl2)}上抜け\n撤退条件：5分MACD上向き継続＋1分RSI50以上でEMA帯を維持する場合。`;
   if (/ショート時[:：]/.test(value)) {
     return value.replace(/ショート時[:：][\s\S]*$/, replacement);
   }
@@ -959,14 +979,10 @@ function hasUsdShortCandidateText(result) {
 }
 
 function buildUsdShortTakeProfitTextFromCandidate(result) {
-  const range = extractUsdShortCandidateRange(result);
-  if (range) {
-    return `ショート時：\nTP1：${formatPrice(range.low - 0.020)}付近\nTP2：${formatPrice(range.low - 0.040)}付近\n伸びた場合：${formatPrice(range.low - 0.060)}付近`;
-  }
+  const range = getValidatedUsdShortCandidateRange(result);
+  if (!range) return "ショート時：\n候補価格確定後に再計算。";
 
-  const current = estimateUsdCurrentPrice(result);
-  if (!current) return "";
-  return `ショート時：\nTP1：${formatPrice(current - 0.004)}付近\nTP2：${formatPrice(current - 0.024)}付近\n伸びた場合：${formatPrice(current - 0.044)}付近`;
+  return `ショート時：\nTP1：${formatPrice(range.low - 0.020)}付近\nTP2：${formatPrice(range.low - 0.040)}付近\n伸びた場合：${formatPrice(range.low - 0.060)}付近`;
 }
 
 function ensureUsdShortTakeProfitText(text, result) {
