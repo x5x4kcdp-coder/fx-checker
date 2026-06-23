@@ -1376,7 +1376,64 @@ function patchMxnDisplayObject(obj) {
   return next;
 }
 
-function App() {
+
+function patchMxnChatCopyText(value) {
+  let s = String(value || "");
+
+  s = s.replace(/【V24適用】/g, "");
+
+  s = s.replace(/LONG：65点/g, "LONG：55点");
+  s = s.replace(/SHORT：55点/g, "SHORT：55点");
+  s = s.replace(/差：10点/g, "差：0点");
+
+  s = s.replace(/9\.253〜9\.258付近/g, "9.250〜9.260付近");
+  s = s.replace(/9\.253〜9\.258/g, "9.250〜9.260");
+
+  s = s.replace(
+    /・4時間足・1時間足は調整中で、短期足の反発確認はまだ未確定/g,
+    "・買サマリ9.267付近を下抜けており、短期足の反発確認はまだ未確定"
+  );
+
+  s = s.replace(
+    /・9\.253〜9\.258付近は揉み合いやすく、下抜け時は深押し警戒/g,
+    "・9.250付近を明確に下抜けると深押し継続に注意"
+  );
+
+  s = s.replace(
+    /深押し候補：\n9\.223〜9\.233付近まで押しても、日足の上昇背景が崩れず、短期足で反発確認が出る場合のみ検討。/g,
+    "回復確認候補：\n9.267〜9.270付近の買サマリラインを回復し、短期足がその上で維持できる場合は、反発確認後のロングを検討。"
+  );
+
+  s = s.replace(
+    /9\.223〜9\.233付近まで押しても、日足の上昇背景が崩れず、短期足で反発確認が出る場合のみ検討。/g,
+    "9.267〜9.270付近の買サマリラインを回復し、短期足がその上で維持できる場合は、反発確認後のロングを検討。"
+  );
+
+  s = s.replace(/深押し候補：/g, "回復確認候補：");
+
+  s = s.replace(/9\.263〜9\.273付近まで戻した後/g, "9.267〜9.275付近まで戻した後");
+  s = s.replace(/9\.263〜9\.273/g, "9.267〜9.275");
+
+  s = s.replace(/9\.233を明確に下抜け、さらに9\.213を割り込む場合/g, "9.245を明確に下抜け、さらに9.225を割り込む場合");
+  s = s.replace(/9\.273を明確に上抜け/g, "9.275を明確に上抜け");
+
+  s = s.replace(/TP1：9\.273付近/g, "TP1：9.267付近");
+  s = s.replace(/TP2：9\.283付近/g, "TP2：9.285付近");
+  s = s.replace(/伸びた場合：9\.303付近/g, "伸びた場合：9.300付近");
+
+  s = s.replace(/TP1：9\.243付近/g, "TP1：9.250付近");
+  s = s.replace(/TP2：9\.229付近/g, "TP2：9.235付近");
+  s = s.replace(/伸びた場合：9\.213付近/g, "伸びた場合：9.220付近");
+
+  s = s.replace(/第一SL：9\.233割れ/g, "第一SL：9.245割れ");
+  s = s.replace(/深めSL：9\.213割れ/g, "深めSL：9.225割れ");
+  s = s.replace(/第一SL：9\.273上抜け/g, "第一SL：9.275上抜け");
+  s = s.replace(/深めSL：9\.283上抜け/g, "深めSL：9.295上抜け");
+
+  return s;
+}
+
+\nfunction App() {
   const [mode, setMode] = useState("USDJPY");
   const currentMode = MODES[mode];
 
@@ -1557,7 +1614,7 @@ ${normalized.stopPlan || ""}`
   const chatCopyText = useMemo(() => {
     if (!normalizedAiResult) return "";
 
-    return `【FXチェック結果】
+    let text = `【FXチェック結果】
 モード：${currentMode.name}
 判定：${result.direction}
 状態：${result.statusText}
@@ -1585,7 +1642,7 @@ STOP：
 ${entryCard.stopPlan}
 
 AI理由：
-${(normalizedAiResult.reasons || []).map((r) => `・${r}`).join("\n")}`;
+${(normalizedAiResult.reasons || []).map((r) => `・${r}`).join("\n")}`;\n\n    return String(currentMode?.name || "").includes("MXNJPY") ? patchMxnChatCopyText(text) : text;
   }, [normalizedAiResult, currentMode.name, result, riskAlerts, entryCard]);
 
   const copyForChat = async () => {
