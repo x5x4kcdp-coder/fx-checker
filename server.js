@@ -1306,7 +1306,8 @@ function deepPatchMxnV24Object(obj, seen = new WeakSet()) {
 
   return obj;
 }
-\nfunction applyMxnFinalHardOverrideV24(next) {
+
+function applyMxnFinalHardOverrideV24(next) {
   if (!next) return next;
 
   const allText = [
@@ -1425,7 +1426,8 @@ function deepPatchMxnV24Object(obj, seen = new WeakSet()) {
     "短期RSIは画像にないため未確認。陽線確定やEMA帯回復を待つ必要がある",
   ];
 
-  deepPatchMxnV24Object(next);\n  return next;
+  deepPatchMxnV24Object(next);
+  return next;
 }
 
 function normalizeServerResult(result, mode = "USDJPY") {
@@ -3653,6 +3655,7 @@ const PORT = process.env.PORT || 8787;
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`AI server running: http://0.0.0.0:${PORT}`);
 });
+
 
 
 
