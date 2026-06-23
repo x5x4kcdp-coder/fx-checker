@@ -267,39 +267,88 @@ function estimateMxnCurrentPrice(result) {
 
   return 9.295;
 }
+
 function buildMxnPriceLevels(result) {
   const current = estimateMxnCurrentPrice(result);
-  const deepMode = current <= 9.280;
 
-  const shallowLow = roundMxn(deepMode ? current - 0.013 : current - 0.005, 3);
-  const shallowHigh = roundMxn(deepMode ? current - 0.003 : current, 3);
+  // 現在値が9.265以下 = 買サマリ9.267下抜け後の深押し状態
+  // この場合は9.290台を主候補にせず、9.250〜9.260を主ロング候補にする
+  if (current <= 9.265) {
+    return {
+      current,
+      deepMode: true,
+      shallowLow: 9.250,
+      shallowHigh: 9.260,
+      deepLow: 9.240,
+      deepHigh: 9.250,
+      recoveryLow: 9.267,
+      recoveryHigh: 9.270,
+      shortLow: 9.267,
+      shortHigh: 9.275,
+      longTp1: 9.267,
+      longTp2: 9.285,
+      longExt: 9.300,
+      shortTp1: 9.250,
+      shortTp2: 9.235,
+      shortExt: 9.220,
+      longSl1: 9.245,
+      longSl2: 9.225,
+      shortSl1: 9.275,
+      shortSl2: 9.295,
+    };
+  }
 
-  const deepLow = roundMxn(deepMode ? current - 0.023 : current - 0.035, 3);
-  const deepHigh = roundMxn(deepMode ? current - 0.013 : current - 0.025, 3);
+  // 9.266〜9.280 = 9.2726付近の深押し反発確認待ち
+  if (current <= 9.280) {
+    return {
+      current,
+      deepMode: true,
+      shallowLow: 9.260,
+      shallowHigh: 9.270,
+      deepLow: 9.250,
+      deepHigh: 9.260,
+      recoveryLow: 9.285,
+      recoveryHigh: 9.295,
+      shortLow: 9.285,
+      shortHigh: 9.295,
+      longTp1: 9.285,
+      longTp2: 9.300,
+      longExt: 9.320,
+      shortTp1: 9.266,
+      shortTp2: 9.250,
+      shortExt: 9.230,
+      longSl1: 9.260,
+      longSl2: 9.250,
+      shortSl1: 9.295,
+      shortSl2: 9.310,
+    };
+  }
 
+  const shallowLow = roundMxn(current - 0.005, 3);
+  const shallowHigh = roundMxn(current, 3);
+  const deepLow = roundMxn(current - 0.035, 3);
+  const deepHigh = roundMxn(current - 0.025, 3);
   const recoveryLow = roundMxn(current + 0.012, 3);
   const recoveryHigh = roundMxn(current + 0.022, 3);
+  const shortLow = roundMxn(current + 0.005, 3);
+  const shortHigh = roundMxn(current + 0.015, 3);
 
-  const shortLow = roundMxn(deepMode ? current + 0.012 : current + 0.005, 3);
-  const shortHigh = roundMxn(deepMode ? current + 0.022 : current + 0.015, 3);
+  const longTp1 = roundMxn(Math.max(current + 0.015, shallowHigh + 0.010), 3);
+  const longTp2 = roundMxn(Math.max(current + 0.025, longTp1 + 0.010), 3);
+  const longExt = roundMxn(Math.max(current + 0.045, longTp2 + 0.020), 3);
 
-  const longTp1 = roundMxn(deepMode ? current + 0.012 : Math.max(current + 0.015, shallowHigh + 0.010), 3);
-  const longTp2 = roundMxn(deepMode ? current + 0.027 : Math.max(current + 0.025, longTp1 + 0.010), 3);
-  const longExt = roundMxn(deepMode ? current + 0.047 : Math.max(current + 0.045, longTp2 + 0.020), 3);
+  const shortTp1 = roundMxn(Math.min(current - 0.015, shortLow - 0.020), 3);
+  const shortTp2 = roundMxn(Math.min(current - 0.029, shortTp1 - 0.010), 3);
+  const shortExt = roundMxn(Math.min(current - 0.045, shortTp2 - 0.010), 3);
 
-  const shortTp1 = roundMxn(deepMode ? current - 0.006 : Math.min(current - 0.015, shortLow - 0.020), 3);
-  const shortTp2 = roundMxn(deepMode ? current - 0.023 : Math.min(current - 0.029, shortTp1 - 0.010), 3);
-  const shortExt = roundMxn(deepMode ? current - 0.043 : Math.min(current - 0.045, shortTp2 - 0.010), 3);
-
-  const longSl1 = roundMxn(deepMode ? current - 0.013 : current - 0.025, 3);
-  const longSl2 = roundMxn(deepMode ? current - 0.023 : current - 0.045, 3);
-
-  const shortSl1 = roundMxn(deepMode ? current + 0.022 : current + 0.015, 3);
-  const shortSl2 = roundMxn(deepMode ? current + 0.037 : current + 0.025, 3);
+  const longSl1 = roundMxn(current - 0.025, 3);
+  const longSl2 = roundMxn(current - 0.045, 3);
+  const shortSl1 = roundMxn(current + 0.015, 3);
+  const shortSl2 = roundMxn(current + 0.025, 3);
 
   return {
     current,
-    deepMode,
+    deepMode: false,
     shallowLow,
     shallowHigh,
     deepLow,
@@ -320,15 +369,22 @@ function buildMxnPriceLevels(result) {
     shortSl2,
   };
 }
+
+
 function buildMxnEntryText(result) {
   const p = buildMxnPriceLevels(result);
 
-  if (p.deepMode) {
+  if (p.current <= 9.265) {
+    return `新規成行禁止。\nロング候補：\n${formatMxnPrice(p.shallowLow)}〜${formatMxnPrice(p.shallowHigh)}付近で下げ止まり、短期足の陽線確定またはEMA帯回復を確認。そのうえで15分足MACDの下落鈍化、または上向き転換気味の動きが出ればロング検討。\n回復確認候補：\n${formatMxnPrice(p.recoveryLow)}〜${formatMxnPrice(p.recoveryHigh)}付近の買サマリラインを回復し、短期足がその上で維持できる場合は、反発確認後のロングを検討。\nショート候補：\nスワップ押し目モードでは優先度低め。${formatMxnPrice(p.shortLow)}〜${formatMxnPrice(p.shortHigh)}付近まで戻した後、上値が重くなり、短期足が再び下向きへ失速する場合のみ短期調整狙いとして検討。`;
+  }
+
+  if (p.current <= 9.280) {
     return `新規成行禁止。\nロング候補：\n${formatMxnPrice(p.shallowLow)}〜${formatMxnPrice(p.shallowHigh)}付近で下げ止まり、短期足の陽線確定またはEMA帯回復を確認。そのうえで15分足MACDの下落鈍化、または上向き転換気味の動きが出ればロング検討。\n回復確認候補：\n${formatMxnPrice(p.recoveryLow)}〜${formatMxnPrice(p.recoveryHigh)}付近を回復し、短期足がEMA帯上で維持できる場合は、反発確認後のロングを検討。\nショート候補：\nスワップ押し目モードでは優先度低め。${formatMxnPrice(p.shortLow)}〜${formatMxnPrice(p.shortHigh)}付近まで戻した後、上値が重くなり、短期足が再び下向きへ失速する場合のみ短期調整狙いとして検討。`;
   }
 
   return `新規成行禁止。\nロング候補：\n${formatMxnPrice(p.shallowLow)}〜${formatMxnPrice(p.shallowHigh)}付近で下げ止まり、短期足の陽線確定またはEMA帯回復を確認。そのうえで15分足MACDの下落鈍化、または上向き転換気味の動きが出ればロング検討。\n深押し候補：\n${formatMxnPrice(p.deepLow)}〜${formatMxnPrice(p.deepHigh)}付近まで押しても、日足の上昇背景が崩れず、短期足で反発確認が出る場合のみ検討。\nショート候補：\nスワップ押し目モードでは優先度低め。${formatMxnPrice(p.shortLow)}〜${formatMxnPrice(p.shortHigh)}付近まで戻した後、上値が重くなり、短期足が再び下向きへ失速する場合のみ短期調整狙いとして検討。`;
 }
+
 function buildMxnCancelText(result) {
   const p = buildMxnPriceLevels(result);
   return `ロング候補取消：\n${formatMxnPrice(p.longSl1)}を明確に下抜け、さらに${formatMxnPrice(p.longSl2)}を割り込む場合。または短期足がEMA帯を回復できず、下向き継続となる場合。\nショート候補取消：\n${formatMxnPrice(p.shortSl1)}を明確に上抜け、短期足がEMA帯を回復し、15分足MACDの下向きが鈍化する場合。`;
