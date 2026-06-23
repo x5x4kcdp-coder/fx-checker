@@ -1216,7 +1216,97 @@ function applyMxnBelowBuySummaryOverrideV21(next) {
 
 
 
-function applyMxnFinalHardOverrideV24(next) {
+
+function patchMxnV24String(value) {
+  if (typeof value !== "string") return value;
+
+  let s = value;
+
+  s = s.replace(/9\.253〜9\.258付近/g, "9.250〜9.260付近");
+  s = s.replace(/9\.253〜9\.258/g, "9.250〜9.260");
+  s = s.replace(/9\.223〜9\.233付近まで押しても、日足の上昇背景が崩れず、短期足で反発確認が出る場合のみ検討。/g, "9.267〜9.270付近の買サマリラインを回復し、短期足がその上で維持できる場合は、反発確認後のロングを検討。");
+  s = s.replace(/深押し候補：\n9\.267〜9\.270付近の買サマリライン/g, "回復確認候補：\n9.267〜9.270付近の買サマリライン");
+
+  s = s.replace(/9\.263〜9\.273付近まで戻した後/g, "9.267〜9.275付近まで戻した後");
+  s = s.replace(/9\.263〜9\.273/g, "9.267〜9.275");
+
+  s = s.replace(/9\.233を明確に下抜け、さらに9\.213を割り込む場合/g, "9.245を明確に下抜け、さらに9.225を割り込む場合");
+  s = s.replace(/9\.273を明確に上抜け/g, "9.275を明確に上抜け");
+
+  s = s.replace(/TP1：9\.273付近/g, "TP1：9.267付近");
+  s = s.replace(/TP2：9\.283付近/g, "TP2：9.285付近");
+  s = s.replace(/伸びた場合：9\.303付近/g, "伸びた場合：9.300付近");
+
+  s = s.replace(/TP1：9\.243付近/g, "TP1：9.250付近");
+  s = s.replace(/TP2：9\.229付近/g, "TP2：9.235付近");
+  s = s.replace(/伸びた場合：9\.213付近/g, "伸びた場合：9.220付近");
+
+  s = s.replace(/第一SL：9\.233割れ/g, "第一SL：9.245割れ");
+  s = s.replace(/深めSL：9\.213割れ/g, "深めSL：9.225割れ");
+  s = s.replace(/第一SL：9\.273上抜け/g, "第一SL：9.275上抜け");
+  s = s.replace(/深めSL：9\.283上抜け/g, "深めSL：9.295上抜け");
+
+  s = s.replace(/9\.253〜9\.258付近は揉み合いやすく、下抜け時は深押し警戒/g, "9.250付近を明確に下抜けると深押し継続に注意");
+
+  return s;
+}
+
+function deepPatchMxnV24Object(obj, seen = new WeakSet()) {
+  if (!obj || typeof obj !== "object") return obj;
+  if (seen.has(obj)) return obj;
+  seen.add(obj);
+
+  const scoreKeys = new Set([
+    "longScore",
+    "shortScore",
+    "long",
+    "short",
+    "LONG",
+    "SHORT",
+    "longPoint",
+    "shortPoint",
+    "longPoints",
+    "shortPoints",
+  ]);
+
+  const diffKeys = new Set(["diff", "scoreDiff", "difference"]);
+
+  if (Array.isArray(obj)) {
+    for (let i = 0; i < obj.length; i++) {
+      if (typeof obj[i] === "string") obj[i] = patchMxnV24String(obj[i]);
+      else deepPatchMxnV24Object(obj[i], seen);
+    }
+    return obj;
+  }
+
+  for (const key of Object.keys(obj)) {
+    const value = obj[key];
+
+    if (typeof value === "string") {
+      obj[key] = patchMxnV24String(value);
+      continue;
+    }
+
+    if (typeof value === "number") {
+      if (scoreKeys.has(key)) obj[key] = 55;
+      if (diffKeys.has(key)) obj[key] = 0;
+      if (key === "confidence") obj[key] = 50;
+      continue;
+    }
+
+    deepPatchMxnV24Object(value, seen);
+  }
+
+  if (obj.scores && typeof obj.scores === "object") {
+    obj.scores.long = 55;
+    obj.scores.short = 55;
+    obj.scores.LONG = 55;
+    obj.scores.SHORT = 55;
+  }
+
+  return obj;
+}
+\nfunction applyMxnFinalHardOverrideV24(next) {
   if (!next) return next;
 
   const allText = [
@@ -1335,7 +1425,7 @@ function applyMxnFinalHardOverrideV24(next) {
     "短期RSIは画像にないため未確認。陽線確定やEMA帯回復を待つ必要がある",
   ];
 
-  return next;
+  deepPatchMxnV24Object(next);\n  return next;
 }
 
 function normalizeServerResult(result, mode = "USDJPY") {
