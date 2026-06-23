@@ -1,4 +1,4 @@
-﻿import { useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import "./App.css";
 
 const MODES = {
@@ -277,185 +277,7 @@ function uniqueMxnRiskAlerts(alerts) {
 }
 
 
-function formatMxnPrice(value) {
-  if (!Number.isFinite(value)) return "9.295";
-  return Number(value).toFixed(3);
-}
-
-function roundMxn(value, digits = 3) {
-  const factor = 10 ** digits;
-  return Math.round(Number(value) * factor) / factor;
-}
-
-function collectMxnPricesFromResult(result) {
-  const text = [
-    result?.summary,
-    result?.risk,
-    result?.entryTrigger,
-    result?.entryPlan,
-    result?.cancelCondition,
-    result?.takeProfitPlan,
-    result?.stopPlan,
-    Array.isArray(result?.reasons) ? result.reasons.join(" ") : result?.reasons,
-    Array.isArray(result?.riskAlerts) ? result.riskAlerts.join(" ") : result?.riskAlerts,
-  ].filter(Boolean).join(" ");
-  const prices = [];
-  for (const match of text.matchAll(/\b9\.\d{2,4}\b/g)) {
-    const v = Number(match[0]);
-    if (v >= 9.0 && v <= 9.8) prices.push(v);
-  }
-  return prices;
-}
-
-function estimateMxnCurrentPrice(result) {
-  const text = [
-    result?.summary,
-    result?.risk,
-    result?.entryTrigger,
-    result?.entryPlan,
-    result?.cancelCondition,
-    result?.takeProfitPlan,
-    result?.stopPlan,
-  ].filter(Boolean).join(" ");
-  const source = String(text);
-  const explicit = source.match(/現在(?:値|価格)(?:は|が|:|：|\s)*([9]\.\d{2,4})/);
-  if (explicit) {
-    const value = Number(explicit[1]);
-    if (Number.isFinite(value) && value >= 9.0 && value <= 9.8) return roundMxn(value, 3);
-  }
-
-  // MXNJPYではAIが押し目候補を現在値として誤認しやすいため、
-  // 明示的な現在値が無い場合は、直近テストスクショの基準価格帯（9.295付近）を使う。
-  // これによりTP1がENTRYと同価格帯になる問題を避ける。
-  return 9.295;
-}
-
-function buildMxnPriceLevels(result) {
-  const current = estimateMxnCurrentPrice(result);
-
-  // 9.258付近、買サマリ9.267下抜け後
-  if (current <= 9.265) {
-    return {
-      current,
-      shallowLow: 9.250,
-      shallowHigh: 9.260,
-      deepLow: 9.240,
-      deepHigh: 9.250,
-      recoveryLow: 9.267,
-      recoveryHigh: 9.270,
-      shortLow: 9.267,
-      shortHigh: 9.275,
-      longTp1: 9.267,
-      longTp2: 9.285,
-      longExt: 9.300,
-      shortTp1: 9.250,
-      shortTp2: 9.235,
-      shortExt: 9.220,
-      longSl1: 9.245,
-      longSl2: 9.225,
-      shortSl1: 9.275,
-      shortSl2: 9.295,
-    };
-  }
-
-  // 9.272付近の深押し反発確認待ち
-  if (current <= 9.280) {
-    return {
-      current,
-      shallowLow: 9.260,
-      shallowHigh: 9.270,
-      deepLow: 9.250,
-      deepHigh: 9.260,
-      recoveryLow: 9.285,
-      recoveryHigh: 9.295,
-      shortLow: 9.285,
-      shortHigh: 9.295,
-      longTp1: 9.285,
-      longTp2: 9.300,
-      longExt: 9.320,
-      shortTp1: 9.266,
-      shortTp2: 9.250,
-      shortExt: 9.230,
-      longSl1: 9.260,
-      longSl2: 9.250,
-      shortSl1: 9.295,
-      shortSl2: 9.310,
-    };
-  }
-
-  const shallowLow = roundMxn(current - 0.005, 3);
-  const shallowHigh = roundMxn(current, 3);
-  const deepLow = roundMxn(current - 0.035, 3);
-  const deepHigh = roundMxn(current - 0.025, 3);
-  const shortLow = roundMxn(current + 0.005, 3);
-  const shortHigh = roundMxn(current + 0.015, 3);
-
-  const longTp1 = roundMxn(Math.max(current + 0.015, shallowHigh + 0.010), 3);
-  const longTp2 = roundMxn(Math.max(current + 0.025, longTp1 + 0.010), 3);
-  const longExt = roundMxn(Math.max(current + 0.045, longTp2 + 0.020), 3);
-  const shortTp1 = roundMxn(Math.min(current - 0.015, shortLow - 0.020), 3);
-  const shortTp2 = roundMxn(Math.min(current - 0.029, shortTp1 - 0.010), 3);
-  const shortExt = roundMxn(Math.min(current - 0.045, shortTp2 - 0.010), 3);
-  const longSl1 = roundMxn(current - 0.025, 3);
-  const longSl2 = roundMxn(current - 0.045, 3);
-  const shortSl1 = roundMxn(current + 0.015, 3);
-  const shortSl2 = roundMxn(current + 0.025, 3);
-
-  return { current, shallowLow, shallowHigh, deepLow, deepHigh, shortLow, shortHigh, longTp1, longTp2, longExt, shortTp1, shortTp2, shortExt, longSl1, longSl2, shortSl1, shortSl2 };
-}
-
-
-
-function buildMxnEntryText(result) {
-  const p = buildMxnPriceLevels(result);
-
-  if (p.current <= 9.265) {
-    return `新規成行禁止。\nロング候補：\n${formatMxnPrice(p.shallowLow)}〜${formatMxnPrice(p.shallowHigh)}付近で下げ止まり、短期足の陽線確定またはEMA帯回復を確認。そのうえで15分足MACDの下落鈍化、または上向き転換気味の動きが出ればロング検討。\n回復確認候補：\n${formatMxnPrice(p.recoveryLow)}〜${formatMxnPrice(p.recoveryHigh)}付近の買サマリラインを回復し、短期足がその上で維持できる場合は、反発確認後のロングを検討。\nショート候補：\nスワップ押し目モードでは優先度低め。${formatMxnPrice(p.shortLow)}〜${formatMxnPrice(p.shortHigh)}付近まで戻した後、上値が重くなり、短期足が再び下向きへ失速する場合のみ短期調整狙いとして検討。`;
-  }
-
-  if (p.current <= 9.280) {
-    return `新規成行禁止。\nロング候補：\n${formatMxnPrice(p.shallowLow)}〜${formatMxnPrice(p.shallowHigh)}付近で下げ止まり、短期足の陽線確定またはEMA帯回復を確認。そのうえで15分足MACDの下落鈍化、または上向き転換気味の動きが出ればロング検討。\n回復確認候補：\n${formatMxnPrice(p.recoveryLow)}〜${formatMxnPrice(p.recoveryHigh)}付近を回復し、短期足がEMA帯上で維持できる場合は、反発確認後のロングを検討。\nショート候補：\nスワップ押し目モードでは優先度低め。${formatMxnPrice(p.shortLow)}〜${formatMxnPrice(p.shortHigh)}付近まで戻した後、上値が重くなり、短期足が再び下向きへ失速する場合のみ短期調整狙いとして検討。`;
-  }
-
-  return `新規成行禁止。\nロング候補：\n${formatMxnPrice(p.shallowLow)}〜${formatMxnPrice(p.shallowHigh)}付近で下げ止まり、短期足の陽線確定またはEMA帯回復を確認。そのうえで15分足MACDの下落鈍化、または上向き転換気味の動きが出ればロング検討。\n深押し候補：\n${formatMxnPrice(p.deepLow)}〜${formatMxnPrice(p.deepHigh)}付近まで押しても、日足の上昇背景が崩れず、短期足で反発確認が出る場合のみ検討。\nショート候補：\nスワップ押し目モードでは優先度低め。${formatMxnPrice(p.shortLow)}〜${formatMxnPrice(p.shortHigh)}付近まで戻した後、上値が重くなり、短期足が再び下向きへ失速する場合のみ短期調整狙いとして検討。`;
-}
-
-
-function buildMxnCancelText(result) {
-  const p = buildMxnPriceLevels(result);
-  return `ロング候補取消：\n${formatMxnPrice(p.longSl1)}を明確に下抜け、さらに${formatMxnPrice(p.longSl2)}を割り込む場合。または短期足がEMA帯を回復できず、下向き継続となる場合。\nショート候補取消：\n${formatMxnPrice(p.shortSl1)}を明確に上抜け、短期足がEMA帯を回復し、15分足MACDの下向きが鈍化する場合。`;
-}
-
-function buildMxnTakeProfitText(result) {
-  const p = buildMxnPriceLevels(result);
-  return `ロング時：\nTP1：${formatMxnPrice(p.longTp1)}付近\nTP2：${formatMxnPrice(p.longTp2)}付近\n伸びた場合：${formatMxnPrice(p.longExt)}付近\n\nショート時：\nTP1：${formatMxnPrice(p.shortTp1)}付近\nTP2：${formatMxnPrice(p.shortTp2)}付近\n伸びた場合：${formatMxnPrice(p.shortExt)}付近\n\nRR目安：\nTP1は短期利確候補。反発/反落が強く、短期足の方向が維持される場合のみTP2以降を検討。`;
-}
-
-function buildMxnStopText(result) {
-  const p = buildMxnPriceLevels(result);
-  return `ロング時：\n第一SL：${formatMxnPrice(p.longSl1)}割れ\n深めSL：${formatMxnPrice(p.longSl2)}割れ\n撤退条件：短期足が下向き継続し、EMA帯を回復できない場合。\n\nショート時：\n第一SL：${formatMxnPrice(p.shortSl1)}上抜け\n深めSL：${formatMxnPrice(p.shortSl2)}上抜け\n撤退条件：短期足が上向き転換し、EMA帯を回復した場合。`;
-}
-
-
-
-function buildMxnRiskAlerts(result) {
-  const p = buildMxnPriceLevels(result || {});
-
-  if (p.current <= 9.265) {
-    return [
-      "短期RSIは未確認のため、反発確認前の成行ロングは禁止",
-      "買サマリ9.258付近を下抜けており、短期足の反発確認はまだ未確定",
-      "9.235付近を明確に下抜けると深押し継続に注意",
-    ];
-  }
-
-  return [
-    "短期RSIは未確認のため、反発確認前の成行ロングは禁止",
-    "4時間足・1時間足は調整中で、短期足の反発確認はまだ未確定",
-    `${formatMxnPrice(p.shallowLow)}〜${formatMxnPrice(p.shallowHigh)}付近は揉み合いやすく、下抜け時は深押し警戒`,
-  ];
-}
-
+// MXNJPYの価格帯計算はserver.js側に集約。App.jsxでは価格の再計算をしない。
 
 function polishMxnTimeframeText(text) {
   if (!text) return text;
@@ -488,90 +310,24 @@ function polishMxnTimeframeText(text) {
 
 function normalizeMxnSwapResult(aiResult) {
   if (!aiResult) return null;
-  let next = { ...aiResult };
+  const next = { ...aiResult };
+
+  // MXNJPYの価格計算はserver.js側で完了させる。
+  // App.jsxでは再計算・価格置換をせず、表示用の文言整形だけ行う。
   ["summary", "risk", "entryTrigger", "entryPlan", "cancelCondition", "takeProfitPlan", "stopPlan"].forEach((key) => {
-    if (next[key]) next[key] = polishMxnSwapText(sanitizeMxnSwapText(sanitizeMacdWords(next[key])));
+    if (next[key]) next[key] = polishMxnTimeframeText(polishMxnSwapText(sanitizeMxnSwapText(sanitizeMacdWords(next[key]))));
   });
-  if (Array.isArray(next.reasons)) next.reasons = next.reasons.map((v) => polishMxnSwapText(sanitizeMxnSwapText(sanitizeMacdWords(v))));
-  if (Array.isArray(next.riskAlerts)) next.riskAlerts = next.riskAlerts.map((v) => polishMxnSwapText(sanitizeMxnSwapText(sanitizeMacdWords(v))));
 
-  const longScore = Number(next.longScore ?? 0);
-  const shortScore = Number(next.shortScore ?? 0);
-  next.decision = String(next.decision || "").includes("ショート") ? "見送り" : (next.decision || "ロング優勢");
-  next.state = next.state && next.state !== "待ち" ? next.state : "反発確認待ち";
-  next.entryStatus = "WAIT";
-  next.confidence = Math.min(Number(next.confidence ?? 60), 60);
-  if (longScore >= shortScore) next.longScore = Math.min(Math.max(longScore || 70, 65), 75);
-  next.shortScore = Math.min(shortScore || 45, 55);
-
-  const mxnFrontendLevels = buildMxnPriceLevels(next);
-  if (mxnFrontendLevels.current <= 9.265) {
-    next.decision = "見送り";
-    next.state = "深押し反発確認待ち";
-    next.entryStatus = "WAIT";
-    next.longScore = 50;
-    next.shortScore = 60;
-    next.confidence = 55;
-    next.riskAlerts = buildMxnRiskAlerts(next);
-    next.risk = next.riskAlerts.join("\n");
-    next.entryTrigger = buildMxnEntryText(next);
-    next.entryPlan = next.entryTrigger;
-    next.cancelCondition = buildMxnCancelText(next);
-    next.takeProfitPlan = buildMxnTakeProfitText(next);
-    next.stopPlan = buildMxnStopText(next);
+  if (Array.isArray(next.reasons)) {
+    next.reasons = next.reasons.map((v) => polishMxnTimeframeText(polishMxnSwapText(sanitizeMxnSwapText(sanitizeMacdWords(v)))));
   }
 
   const rsiRisk = "短期RSIは未確認のため、反発確認前の成行ロングは禁止";
-  const alerts = Array.isArray(next.riskAlerts) ? next.riskAlerts : next.risk ? [next.risk] : [];
+  const alerts = Array.isArray(next.riskAlerts) ? next.riskAlerts : next.risk ? String(next.risk).split(/\n+/) : [];
   next.riskAlerts = uniqueMxnRiskAlerts([rsiRisk, ...alerts]).slice(0, 5);
   next.risk = next.riskAlerts.join("\n");
+  next.entryStatus = "WAIT";
 
-  if (!next.summary || !String(next.summary).includes("短期RSIは未確認")) {
-    next.summary = polishMxnSwapText(sanitizeMxnSwapText(`${next.summary || ""} 短期RSIは未確認のため断定せず、短期足の下げ止まり・陽線確定・EMA帯回復を待つ場面。`)).trim();
-  }
-
-  if (next.entryTrigger) {
-    next.entryTrigger = polishMxnSwapText(sanitizeMxnSwapText(next.entryTrigger))
-      .replace(/短期足の下げ止まり\s*、?\s*陽線確定/g, "短期足の下げ止まり、陽線確定");
-  } else {
-    next.entryTrigger = "新規成行禁止。ロング候補は現在値付近の浅い押し目で、短期足の下げ止まり、陽線確定、またはEMA帯回復を確認。そのうえで15分足MACDが下向きから鈍化、または上向き転換気味となるなら検討。";
-  }
-
-  // MXNJPYモードでは「現在値付近」だけのTP/STOPや崩れた時間足表現を避け、9.xx台の目安価格を再生成する。
-  next.summary = polishMxnTimeframeText(next.summary);
-  next.entryTrigger = polishMxnTimeframeText(next.entryTrigger);
-  next.cancelCondition = polishMxnTimeframeText(next.cancelCondition);
-  next.stopPlan = polishMxnTimeframeText(next.stopPlan);
-  if (Array.isArray(next.reasons)) next.reasons = next.reasons.map((v) => polishMxnTimeframeText(v));
-  if (Array.isArray(next.riskAlerts)) next.riskAlerts = uniqueMxnRiskAlerts(next.riskAlerts.map((v) => polishMxnTimeframeText(v))).slice(0, 5);
-  next.risk = (next.riskAlerts || []).join("\n");
-
-  const combinedMxnText = [next.entryTrigger, next.cancelCondition, next.takeProfitPlan, next.stopPlan, next.summary].filter(Boolean).join(" ");
-  if (/現在値付近/.test(combinedMxnText) || /短期足1時間|短期足と短期足|未確認維持|上向き転換し、する場合/.test(combinedMxnText)) {
-    next.entryTrigger = buildMxnEntryText(next);
-    next.cancelCondition = buildMxnCancelText(next);
-    next.takeProfitPlan = buildMxnTakeProfitText(next);
-    next.stopPlan = buildMxnStopText(next);
-  } else {
-    if (next.takeProfitPlan) next.takeProfitPlan = normalizeTakeProfitText(polishMxnTimeframeText(polishMxnSwapText(sanitizeMxnSwapText(next.takeProfitPlan))));
-    if (next.cancelCondition) next.cancelCondition = polishMxnTimeframeText(polishMxnSwapText(next.cancelCondition));
-    if (next.stopPlan) next.stopPlan = polishMxnTimeframeText(polishMxnSwapText(next.stopPlan));
-  }
-
-  // MXNJPYでTP/STOPが抽象表現に寄りすぎた場合も、実用的な9.xx台の目安へ戻す。
-  if (/TP1\s*現在値付近|第一SL\s*現在値付近|深めSL\s*現在値付近/.test(String(next.takeProfitPlan || "") + String(next.stopPlan || ""))) {
-    next.takeProfitPlan = buildMxnTakeProfitText(next);
-    next.stopPlan = buildMxnStopText(next);
-  }
-
-  next.summary = polishMxnTimeframeText(next.summary);
-  next.entryTrigger = buildMxnEntryText(next);
-  next.cancelCondition = buildMxnCancelText(next);
-  next.takeProfitPlan = buildMxnTakeProfitText(next); // RR重複を防ぎ、9.xx台の具体価格を維持
-  next.stopPlan = buildMxnStopText(next);
-  if (Array.isArray(next.reasons)) next.reasons = next.reasons.map((v) => polishMxnTimeframeText(v));
-  next.riskAlerts = buildMxnRiskAlerts(next);
-  next.risk = next.riskAlerts.join("\n");
   return next;
 }
 
@@ -674,7 +430,7 @@ function estimateUsdCurrentPrice(result) {
   const min = Math.min(...prices);
   const spread = max - min;
   const rsiZoneForAnchor = parseUsdRsiZone(text);
-  if (rsiZoneForAnchor != null && rsiZoneForAnchor >= 30 && rsiZoneForAnchor <= 35) {
+  if (rsiZoneForAnchor != null && rsiZoneForAnchor >= 30 && rsiZoneForAnchor <= 35 && min > 161.750 && spread < 0.200) {
     return 161.604;
   }
 
@@ -735,7 +491,7 @@ function buildUsdShortModeTakeProfitText(result) {
 
 function buildUsdShortModeStopText(result) {
   const p = buildUsdShortModeLevels(result);
-  return `ロング時：\n第一SL：${fmtPrice(p.longSl1)}割れ\n深めSL：${fmtPrice(p.longSl2)}割れ\n撤退条件：反発後に再び1分RSIが40を割り込み、短期EMAを回復できない場合。\n\nショート時：\n第一SL：${fmtPrice(p.shortSl1)}上抜け\n深めSL：${fmtPrice(p.shortSl2)}上抜け\n撤退条件：5分MACDが上向き転換し、1分RSI50以上でEMA帯を回復する場合。`;
+  return `ロング時：\n第一SL：${fmtPrice(p.longSl1)}割れ\n深めSL：${fmtPrice(p.longSl2)}割れ\n撤退条件：5分MACDが下向き継続し、1分RSIが50を下回って推移する場合。\n\nショート時：\n第一SL：${fmtPrice(p.shortSl1)}上抜け\n深めSL：${fmtPrice(p.shortSl2)}上抜け\n撤退条件：5分MACDが上向き転換し、1分RSI50以上でEMA帯を回復する場合。`;
 }
 
 function buildUsdShortModeCancelText(result) {
@@ -1411,135 +1167,6 @@ function buildDisplayResult({ normalizedAiResult, answers, mode }) {
   return { long, short, diff, direction, status, statusText, message, className };
 }
 
-function patchMxnDisplayText(value) {
-  if (typeof value !== "string") return value;
-
-  return value
-    .replace(/【V24適用】/g, "")
-    .replace(/9\.253〜9\.258付近/g, "9.235〜9.245付近")
-    .replace(/9\.253〜9\.258/g, "9.235〜9.245")
-    .replace(/深押し候補：\n9\.223〜9\.233付近まで押しても、日足の上昇背景が崩れず、短期足で反発確認が出る場合のみ検討。/g, "回復確認候補：\n9.258〜9.267付近を回復し、短期足がその上で維持できる場合は、反発確認後のロングを検討。")
-    .replace(/9\.223〜9\.233付近まで押しても、日足の上昇背景が崩れず、短期足で反発確認が出る場合のみ検討。/g, "9.258〜9.267付近を回復し、短期足がその上で維持できる場合は、反発確認後のロングを検討。")
-    .replace(/深押し候補：/g, "回復確認候補：")
-    .replace(/9\.263〜9\.273付近まで戻した後/g, "9.250〜9.260付近まで戻した後")
-    .replace(/9\.263〜9\.273/g, "9.250〜9.260")
-    .replace(/9\.233を明確に下抜け、さらに9\.213を割り込む場合/g, "9.225を明確に下抜け、さらに9.210を割り込む場合")
-    .replace(/9\.273を明確に上抜け/g, "9.267を明確に上抜け")
-    .replace(/TP1：9\.273付近/g, "TP1：9.258付近")
-    .replace(/TP2：9\.283付近/g, "TP2：9.267付近")
-    .replace(/伸びた場合：9\.303付近/g, "伸びた場合：9.285付近")
-    .replace(/TP1：9\.243付近/g, "TP1：9.235付近")
-    .replace(/TP2：9\.229付近/g, "TP2：9.225付近")
-    .replace(/伸びた場合：9\.213付近/g, "伸びた場合：9.210付近")
-    .replace(/第一SL：9\.233割れ/g, "第一SL：9.225割れ")
-    .replace(/深めSL：9\.213割れ/g, "深めSL：9.210割れ")
-    .replace(/第一SL：9\.273上抜け/g, "第一SL：9.267上抜け")
-    .replace(/深めSL：9\.283上抜け/g, "深めSL：9.275上抜け")
-    .replace(/9\.253〜9\.258付近は揉み合いやすく、下抜け時は深押し警戒/g, "9.235付近を明確に下抜けると深押し継続に注意");
-}
-
-function patchMxnDisplayObject(obj) {
-  if (!obj || typeof obj !== "object") return obj;
-
-  if (Array.isArray(obj)) {
-    return obj.map((v) => typeof v === "string" ? patchMxnDisplayText(v) : patchMxnDisplayObject(v));
-  }
-
-  const next = { ...obj };
-
-  Object.keys(next).forEach((key) => {
-    const value = next[key];
-
-    if (typeof value === "string") {
-      next[key] = patchMxnDisplayText(value);
-    } else if (value && typeof value === "object") {
-      next[key] = patchMxnDisplayObject(value);
-    }
-  });
-
-  next.longScore = 50;
-  next.shortScore = 60;
-  next.long = 50;
-  next.short = 60;
-  next.LONG = 50;
-  next.SHORT = 60;
-  next.diff = 10;
-
-  return next;
-}
-
-
-function patchMxnChatCopyText(value) {
-  let text = String(value ?? "");
-
-  if (!text.includes("MXNJPYスワップ押し目モード")) return text;
-
-  const isMxn9243Deep =
-    /現在値は9\.24[0-9]付近/.test(text) ||
-    /買サマリ9\.258付近を下抜け/.test(text) ||
-    /LONG：50点[\s\S]*SHORT：60点/.test(text);
-
-  if (!isMxn9243Deep) return text;
-
-  const entrySection = [
-    "ENTRY：",
-    "新規成行禁止。",
-    "ロング候補：",
-    "9.235〜9.245付近で下げ止まり、短期足の陽線確定または15分足EMA5回復を確認できる場合のみ検討。",
-    "回復確認候補：",
-    "9.258〜9.267付近を回復し、買サマリ上で維持できる場合は反発確認後のロングを検討。",
-    "ショート候補：",
-    "スワップ押し目モードでは優先度低め。9.250〜9.260付近まで戻した後、上値が重くなり、15分足・1時間足MACDが下向き継続なら短期調整狙いのみ検討。"
-  ].join("\n");
-
-  const cancelSection = [
-    "CANCEL：",
-    "ロング候補取消：",
-    "9.225を明確に下抜け、さらに9.210を割り込む場合。または短期足がEMA帯を回復できず、下向き継続となる場合。",
-    "ショート候補取消：",
-    "9.267を明確に上抜け、さらに9.275を上抜ける場合。または短期足がEMA帯を回復し、15分足MACDの下向きが鈍化する場合。"
-  ].join("\n");
-
-  const tpSection = [
-    "TP：",
-    "ロング時：",
-    "TP1：9.258付近",
-    "TP2：9.267付近",
-    "伸びた場合：9.285付近",
-    "",
-    "ショート時：",
-    "TP1：9.235付近",
-    "TP2：9.225付近",
-    "伸びた場合：9.210付近",
-    "",
-    "RR目安：",
-    "TP1は短期利確候補。反発/反落が強く、短期足の方向が維持される場合のみTP2以降を検討。"
-  ].join("\n");
-
-  const stopSection = [
-    "STOP：",
-    "ロング時：",
-    "第一SL：9.225割れ",
-    "深めSL：9.210割れ",
-    "撤退条件：短期足が下向き継続し、EMA帯を回復できない場合。",
-    "",
-    "ショート時：",
-    "第一SL：9.267上抜け",
-    "深めSL：9.275上抜け",
-    "撤退条件：短期足が上向き転換し、EMA帯を回復した場合。"
-  ].join("\n");
-
-  text = text.replace(/状態：深押し反発確認待ち/g, "状態：深押し継続警戒 / 反発確認待ち");
-
-  text = text.replace(/ENTRY：[\s\S]*?(?=\n\nCANCEL：)/, entrySection);
-  text = text.replace(/CANCEL：[\s\S]*?(?=\n\nTP：)/, cancelSection);
-  text = text.replace(/TP：[\s\S]*?(?=\n\nSTOP：)/, tpSection);
-  text = text.replace(/STOP：[\s\S]*?(?=\n\nAI理由：|$)/, stopSection);
-
-  return text;
-}
-
-
 function App() {
   const [mode, setMode] = useState("USDJPY");
   const currentMode = MODES[mode];
@@ -1621,7 +1248,7 @@ function App() {
         return;
       }
 
-      setAiResult(mode === "MXNJPY" ? patchMxnDisplayObject(data) : data);
+      setAiResult(data);
 
       const normalized = normalizeFxResult(data, mode) || data;
       setMemo(
@@ -1721,7 +1348,7 @@ ${normalized.stopPlan || ""}`
   const chatCopyText = useMemo(() => {
     if (!normalizedAiResult) return "";
 
-    let text = `【FXチェック結果】
+    return `【FXチェック結果】
 モード：${currentMode.name}
 判定：${result.direction}
 状態：${result.statusText}
@@ -1750,8 +1377,6 @@ ${entryCard.stopPlan}
 
 AI理由：
 ${(normalizedAiResult.reasons || []).map((r) => `・${r}`).join("\n")}`;
-
-    return String(currentMode?.name || "").includes("MXNJPY") ? patchMxnChatCopyText(text) : text;
   }, [normalizedAiResult, currentMode.name, result, riskAlerts, entryCard]);
 
   const copyForChat = async () => {
@@ -1993,8 +1618,3 @@ ${(normalizedAiResult.reasons || []).map((r) => `・${r}`).join("\n")}`;
 }
 
 export default App;
-
-
-
-
-
