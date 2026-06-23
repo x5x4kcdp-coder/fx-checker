@@ -39,6 +39,12 @@ function sanitizeDirectionWords(text) {
     .replace(/青から赤へ切り替わり上向き/g, "上向き転換気味")
     .replace(/赤から青へ切り替わり下向き転換気味/g, "下向き転換気味")
     .replace(/赤から青へ切り替わり下向き/g, "下向き転換気味")
+    .replace(/15分足MACDは赤で上向き継続気味の状態/g, "15分足MACDは上向き継続気味でロング方向")
+    .replace(/15分足MACDは赤で上向き継続気味/g, "15分足MACDは上向き継続気味でロング方向")
+    .replace(/5分足MACDは赤で上向き転換気味/g, "5分足MACDは上向き転換気味だが、勢いはまだ限定的")
+    .replace(/1分足RSIは([0-9]{1,2}(?:\.[0-9]+)?)で買われ過ぎ手前もまだ反落サインは出ていない/g, "1分足RSIは$1でやや高く、現在値からは追い買いせず押し目を待ちたい位置")
+    .replace(/1分足RSIは([0-9]{1,2}(?:\.[0-9]+)?)でやや強く押し目買い条件に適合/g, "1分足RSIは$1でやや高く、現在値からは追い買いせず押し目を待ちたい位置")
+    .replace(/1分RSIは([0-9]{1,2}(?:\.[0-9]+)?)でやや強く押し目買い条件に適合/g, "1分RSIは$1でやや高く、現在値からは追い買いせず押し目を待ちたい位置")
     .replace(/赤（上向き）/g, "上向き")
     .replace(/青（下向き）/g, "下向き")
     .replace(/赤\s*\(上向き\)/g, "上向き")
@@ -56,6 +62,11 @@ function sanitizeDirectionWords(text) {
     .replace(/青継続/g, "下向き継続")
     .replace(/MACD赤/g, "MACD上向き")
     .replace(/MACD青/g, "MACD下向き")
+    .replace(/MACDは赤で上向き継続気味の状態/g, "MACDは上向き継続気味でロング方向")
+    .replace(/MACDは赤で上向き継続気味/g, "MACDは上向き継続気味でロング方向")
+    .replace(/MACDは赤で上向き転換気味/g, "MACDは上向き転換気味だが、勢いはまだ限定的")
+    .replace(/MACDは青で下向き継続気味の状態/g, "MACDは下向き継続気味")
+    .replace(/MACDは青で下向き転換気味/g, "MACDは下向き転換気味")
     .replace(/青縮小気味/g, "下落の勢いがやや鈍化")
     .replace(/青縮小/g, "下落の勢いがやや鈍化")
     .replace(/赤縮小気味/g, "上昇の勢いがやや鈍化")
@@ -735,6 +746,9 @@ function normalizeTakeProfitText(text) {
     .replace(/次の深めの戻り高値付近/g, "次の下値支持帯付近");
 
   value = value
+    .replace(/TP1は短期利確(?:向き|候補)[^。\n]*。?/g, "")
+    .replace(/反発が強く5分足の上向きを維持する場合のみTP2以降を検討。?/g, "")
+    .replace(/5分足が上向きを維持する場合のみTP2以降を検討。?/g, "")
     .replace(/RR目安[:：][^\n]*(?:\n)?/g, "")
     .replace(/RR目安は[^。\n]*。?/g, "")
     .replace(/TP1が近すぎる場合は[^。]*。?/g, "")
@@ -999,6 +1013,12 @@ function polishUsdShortModeText(text) {
     .replace(/青から赤へ切り替わり上向き/g, "上向き転換気味")
     .replace(/赤から青へ切り替わり下向き転換気味/g, "下向き転換気味")
     .replace(/赤から青へ切り替わり下向き/g, "下向き転換気味")
+    .replace(/15分足MACDは赤で上向き継続気味の状態/g, "15分足MACDは上向き継続気味でロング方向")
+    .replace(/15分足MACDは赤で上向き継続気味/g, "15分足MACDは上向き継続気味でロング方向")
+    .replace(/5分足MACDは赤で上向き転換気味/g, "5分足MACDは上向き転換気味だが、勢いはまだ限定的")
+    .replace(/1分足RSIは([0-9]{1,2}(?:\.[0-9]+)?)で買われ過ぎ手前もまだ反落サインは出ていない/g, "1分足RSIは$1でやや高く、現在値からは追い買いせず押し目を待ちたい位置")
+    .replace(/1分足RSIは([0-9]{1,2}(?:\.[0-9]+)?)でやや強く押し目買い条件に適合/g, "1分足RSIは$1でやや高く、現在値からは追い買いせず押し目を待ちたい位置")
+    .replace(/1分RSIは([0-9]{1,2}(?:\.[0-9]+)?)でやや強く押し目買い条件に適合/g, "1分RSIは$1でやや高く、現在値からは追い買いせず押し目を待ちたい位置")
     .replace(/1分足RSIは([0-9]{1,2}(?:\.[0-9]+)?)でやや強く押し目買い条件に適合/g, "1分足RSIは$1でやや高く、押し目を待ちたい位置")
     .replace(/1分RSIは([0-9]{1,2}(?:\.[0-9]+)?)でやや強く押し目買い条件に適合/g, "1分RSIは$1でやや高く、押し目を待ちたい位置")
     .replace(/1分足RSIは40台前半/g, "1分RSIは40台前半")
@@ -1021,6 +1041,11 @@ function polishUsdShortModeText(text) {
     .replace(/MACDが上向き傾向上向き転換/g, "MACDが上向き転換")
     .replace(/RR目安[:：][^\n]*(?:\n)?RR目安[:：]/g, "RR目安:")
     .replace(/。\s*。/g, "。")
+    .replace(/赤で上向き継続気味の状態/g, "上向き継続気味でロング方向")
+    .replace(/赤で上向き継続気味/g, "上向き継続気味でロング方向")
+    .replace(/赤で上向き転換気味/g, "上向き転換気味だが、勢いはまだ限定的")
+    .replace(/青で下向き継続気味の状態/g, "下向き継続気味")
+    .replace(/青で下向き転換気味/g, "下向き転換気味")
     .replace(/付近付近/g, "付近");
   return sortDisplayedPriceRanges(value);
 }
@@ -1154,7 +1179,7 @@ function normalizeServerResult(result, mode = "USDJPY") {
       "1時間足は反発基調だが、上昇継続の確認はまだ必要",
       "15分足MACDは上向き継続でロング方向",
       "5分足MACDは上向き転換気味だが、勢いはまだやや限定的",
-      rsi != null ? `1分足RSIは${rsi}でやや高く、追い買いは避けたい` : "1分足RSIはやや高く、追い買いは避けたい",
+      rsi != null ? `1分足RSIは${rsi}でやや高く、現在値からは追い買いせず押し目を待ちたい位置` : "1分足RSIはやや高く、現在値からは追い買いせず押し目を待ちたい位置",
     ];
     next.takeProfitPlan = buildHighRsiTakeProfitText(next);
     const fixedHighRsi = normalizeUsdHighRsiShortSide(next);
