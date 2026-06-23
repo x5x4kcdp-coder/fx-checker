@@ -677,7 +677,7 @@ function normalizeMxnSwapResult(result) {
   }
 
   applyMxnBelowBuySummaryOverrideV21(next);
-  next = applyMxnFinalHardOverrideV24(next);
+  applyMxnFinalHardOverrideV24(next);
   return next;
 }
 
@@ -3563,6 +3563,7 @@ const PORT = process.env.PORT || 8787;
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`AI server running: http://0.0.0.0:${PORT}`);
 });
+
 
 
 
