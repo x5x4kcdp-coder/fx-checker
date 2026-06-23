@@ -383,83 +383,6 @@ function polishMxnTimeframeText(text) {
     .trim();
 }
 
-function applyMxnDeepPullbackOverride(next) {
-  if (!next) return next;
-
-  const text = [
-    next.decision,
-    next.state,
-    next.summary,
-    next.risk,
-    next.entryTrigger,
-    next.entryPlan,
-    next.cancelCondition,
-    next.takeProfitPlan,
-    next.stopPlan,
-    Array.isArray(next.reasons) ? next.reasons.join(" ") : next.reasons,
-    Array.isArray(next.riskAlerts) ? next.riskAlerts.join(" ") : next.riskAlerts,
-  ].filter(Boolean).join(" ");
-
-  const shouldApply =
-    String(next.state || "").includes("深押し") ||
-    /9\.272|9\.273|9\.266|9\.267|9\.270|買いサマリ|買サマリ|深押し反発/.test(String(text));
-
-  if (!shouldApply) return next;
-
-  next.decision = "見送り〜ロング寄り";
-  next.state = "深押し反発確認待ち";
-  next.entryStatus = "WAIT";
-  next.longScore = Math.min(Number(next.longScore ?? 65), 65);
-  next.shortScore = Math.max(Number(next.shortScore ?? 50), 50);
-  next.confidence = Math.min(Number(next.confidence ?? 55), 55);
-
-  next.riskAlerts = [
-    "短期RSIは未確認のため、反発確認前の成行ロングは禁止",
-    "4時間足・1時間足・15分足は調整中で、短期の反発はまだ未確定",
-    "9.266〜9.270付近を明確に下抜けると深押し継続に注意",
-  ];
-  next.risk = next.riskAlerts.join("\n");
-
-  next.entryTrigger =
-    "新規成行禁止。\n" +
-    "ロング候補：\n" +
-    "9.260〜9.270付近で下げ止まり、短期足の陽線確定またはEMA帯回復を確認。そのうえで15分足MACDの下落鈍化、または上向き転換気味の動きが出ればロング検討。\n" +
-    "回復確認候補：\n" +
-    "9.285〜9.295付近を回復し、短期足がEMA帯上で維持できる場合は、反発確認後のロングを検討。\n" +
-    "ショート候補：\n" +
-    "スワップ押し目モードでは優先度低め。9.285〜9.295付近まで戻した後、上値が重くなり、短期足が再び下向きへ失速する場合のみ短期調整狙いとして検討。";
-
-  next.cancelCondition =
-    "ロング候補取消：\n" +
-    "9.260を明確に下抜け、さらに9.250を割り込む場合。または短期足がEMA帯を回復できず、下向き継続となる場合。\n" +
-    "ショート候補取消：\n" +
-    "9.295を明確に上抜け、さらに9.310を上抜ける場合。または短期足がEMA帯を回復し、15分足MACDの下向きが鈍化する場合。";
-
-  next.takeProfitPlan =
-    "ロング時：\n" +
-    "TP1：9.285付近\n" +
-    "TP2：9.300付近\n" +
-    "伸びた場合：9.320付近\n\n" +
-    "ショート時：\n" +
-    "TP1：9.266付近\n" +
-    "TP2：9.250付近\n" +
-    "伸びた場合：9.230付近\n\n" +
-    "RR目安：\n" +
-    "TP1は短期利確候補。反発/反落が強く、短期足の方向が維持される場合のみTP2以降を検討。";
-
-  next.stopPlan =
-    "ロング時：\n" +
-    "第一SL：9.260割れ\n" +
-    "深めSL：9.250割れ\n" +
-    "撤退条件：短期足が下向き継続し、EMA帯を回復できない場合。\n\n" +
-    "ショート時：\n" +
-    "第一SL：9.295上抜け\n" +
-    "深めSL：9.310上抜け\n" +
-    "撤退条件：短期足が上向き転換し、EMA帯を回復した場合。";
-
-  return next;
-}
-
 function normalizeMxnSwapResult(result) {
   const next = { ...result };
   ["summary", "risk", "entryTrigger", "entryPlan", "cancelCondition", "takeProfitPlan", "stopPlan"].forEach((key) => {
@@ -3188,7 +3111,6 @@ const PORT = process.env.PORT || 8787;
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`AI server running: http://0.0.0.0:${PORT}`);
 });
-
 
 
 
