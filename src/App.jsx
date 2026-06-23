@@ -1319,6 +1319,63 @@ function buildDisplayResult({ normalizedAiResult, answers, mode }) {
   return { long, short, diff, direction, status, statusText, message, className };
 }
 
+function patchMxnDisplayText(value) {
+  if (typeof value !== "string") return value;
+
+  return value
+    .replace(/【V24適用】/g, "")
+    .replace(/9\.253〜9\.258付近/g, "9.250〜9.260付近")
+    .replace(/9\.253〜9\.258/g, "9.250〜9.260")
+    .replace(/深押し候補：\n9\.223〜9\.233付近まで押しても、日足の上昇背景が崩れず、短期足で反発確認が出る場合のみ検討。/g, "回復確認候補：\n9.267〜9.270付近の買サマリラインを回復し、短期足がその上で維持できる場合は、反発確認後のロングを検討。")
+    .replace(/9\.223〜9\.233付近まで押しても、日足の上昇背景が崩れず、短期足で反発確認が出る場合のみ検討。/g, "9.267〜9.270付近の買サマリラインを回復し、短期足がその上で維持できる場合は、反発確認後のロングを検討。")
+    .replace(/深押し候補：/g, "回復確認候補：")
+    .replace(/9\.263〜9\.273付近まで戻した後/g, "9.267〜9.275付近まで戻した後")
+    .replace(/9\.263〜9\.273/g, "9.267〜9.275")
+    .replace(/9\.233を明確に下抜け、さらに9\.213を割り込む場合/g, "9.245を明確に下抜け、さらに9.225を割り込む場合")
+    .replace(/9\.273を明確に上抜け/g, "9.275を明確に上抜け")
+    .replace(/TP1：9\.273付近/g, "TP1：9.267付近")
+    .replace(/TP2：9\.283付近/g, "TP2：9.285付近")
+    .replace(/伸びた場合：9\.303付近/g, "伸びた場合：9.300付近")
+    .replace(/TP1：9\.243付近/g, "TP1：9.250付近")
+    .replace(/TP2：9\.229付近/g, "TP2：9.235付近")
+    .replace(/伸びた場合：9\.213付近/g, "伸びた場合：9.220付近")
+    .replace(/第一SL：9\.233割れ/g, "第一SL：9.245割れ")
+    .replace(/深めSL：9\.213割れ/g, "深めSL：9.225割れ")
+    .replace(/第一SL：9\.273上抜け/g, "第一SL：9.275上抜け")
+    .replace(/深めSL：9\.283上抜け/g, "深めSL：9.295上抜け")
+    .replace(/9\.253〜9\.258付近は揉み合いやすく、下抜け時は深押し警戒/g, "9.250付近を明確に下抜けると深押し継続に注意");
+}
+
+function patchMxnDisplayObject(obj) {
+  if (!obj || typeof obj !== "object") return obj;
+
+  if (Array.isArray(obj)) {
+    return obj.map((v) => typeof v === "string" ? patchMxnDisplayText(v) : patchMxnDisplayObject(v));
+  }
+
+  const next = { ...obj };
+
+  Object.keys(next).forEach((key) => {
+    const value = next[key];
+
+    if (typeof value === "string") {
+      next[key] = patchMxnDisplayText(value);
+    } else if (value && typeof value === "object") {
+      next[key] = patchMxnDisplayObject(value);
+    }
+  });
+
+  next.longScore = 55;
+  next.shortScore = 55;
+  next.long = 55;
+  next.short = 55;
+  next.LONG = 55;
+  next.SHORT = 55;
+  next.diff = 0;
+
+  return next;
+}
+
 function App() {
   const [mode, setMode] = useState("USDJPY");
   const currentMode = MODES[mode];
@@ -1400,7 +1457,7 @@ function App() {
         return;
       }
 
-      setAiResult(data);
+      setAiResult(mode === "MXNJPY" ? patchMxnDisplayObject(data) : data);
 
       const normalized = normalizeFxResult(data, mode) || data;
       setMemo(
@@ -1770,4 +1827,5 @@ ${(normalizedAiResult.reasons || []).map((r) => `・${r}`).join("\n")}`;
 }
 
 export default App;
+
 
