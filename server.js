@@ -8,7 +8,7 @@ dotenv.config();
 
 const app = express();
 const upload = multer({ storage: multer.memoryStorage() });
-const BUILD_VERSION = "v31-usdjpy-anchor-macd";
+const BUILD_VERSION = "v32-usdjpy-scoring-fallback";
 
 app.use(cors());
 app.use(express.json({ limit: "20mb" }));
@@ -1292,6 +1292,149 @@ function normalizeUsdHighRsiShortSide(result) {
   return next;
 }
 
+
+function normalizeFullWidthNumberText(value) {
+  return String(value ?? "")
+    .replace(/[０-９]/g, (ch) => String.fromCharCode(ch.charCodeAt(0) - 0xFEE0))
+    .replace(/[．]/g, ".")
+    .replace(/[，]/g, ",");
+}
+
+function parseSafeScore(value, fallback = 50) {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return Math.max(0, Math.min(100, Math.round(value)));
+  }
+  const raw = normalizeFullWidthNumberText(value).trim();
+  if (!raw) return fallback;
+  const lower = raw.toLowerCase();
+  const wordMap = {
+    zero: 0,
+    ten: 10,
+    twenty: 20,
+    thirty: 30,
+    forty: 40,
+    fourty: 40,
+    fifty: 50,
+    sixty: 60,
+    seventy: 70,
+    eighty: 80,
+    ninety: 90,
+    hundred: 100,
+  };
+  if (Object.prototype.hasOwnProperty.call(wordMap, lower)) return wordMap[lower];
+  const match = raw.match(/-?\d+(?:\.\d+)?/);
+  if (!match) return fallback;
+  const num = Number(match[0]);
+  if (!Number.isFinite(num)) return fallback;
+  return Math.max(0, Math.min(100, Math.round(num)));
+}
+
+function looksLikeRawJsonText(value) {
+  const s = String(value || "").trim();
+  if (!s) return false;
+  if ((s.startsWith("{") && s.includes('"decision"')) || (s.includes('"longScore"') && s.includes('"shortScore"'))) return true;
+  if (s.length > 600 && /"(?:summary|reasons|entryPlan|takeProfitPlan)"\s*:/.test(s)) return true;
+  return false;
+}
+
+function sanitizeUsdJsonFallbackResult(result) {
+  const next = { ...(result || {}) };
+  next.longScore = parseSafeScore(next.longScore, 50);
+  next.shortScore = parseSafeScore(next.shortScore, 50);
+  next.confidence = parseSafeScore(next.confidence, 50);
+
+  if (!Number.isFinite(Number(next.longScore))) next.longScore = 50;
+  if (!Number.isFinite(Number(next.shortScore))) next.shortScore = 50;
+  if (!Number.isFinite(Number(next.confidence))) next.confidence = 50;
+
+  const safeReason = "AI返答の形式が一部崩れたため、安全側で見送り判定に補正";
+  const sanitizeField = (value, fallback = "") => {
+    if (value == null) return fallback;
+    const s = String(value);
+    if (looksLikeRawJsonText(s)) return fallback || safeReason;
+    return s.replace(/再度スクショを入れ直してください。?/g, "安全側で見送り、方向一致と反発・反落確認を待つ場面。").trim();
+  };
+
+  ["summary", "risk", "entryTrigger", "entryPlan", "cancelCondition", "takeProfitPlan", "stopPlan"].forEach((key) => {
+    if (next[key]) next[key] = sanitizeField(next[key], key === "summary" ? "AI返答の形式が一部崩れたため、安全側で見送り判定に補正しました。" : "安全側で見送り、方向一致と反発・反落確認を待つ場面。");
+  });
+
+  if (Array.isArray(next.reasons)) {
+    const reasons = next.reasons
+      .map((v) => sanitizeField(v, ""))
+      .filter((v) => v && !looksLikeRawJsonText(v));
+    next.reasons = reasons.length ? reasons : [safeReason];
+  } else if (next.reasons) {
+    const reason = sanitizeField(next.reasons, "");
+    next.reasons = reason && !looksLikeRawJsonText(reason) ? [reason] : [safeReason];
+  } else {
+    next.reasons = [safeReason];
+  }
+
+  if (Array.isArray(next.riskAlerts)) {
+    next.riskAlerts = next.riskAlerts
+      .map((v) => sanitizeField(v, ""))
+      .filter((v) => v && !looksLikeRawJsonText(v));
+  }
+  if (!Array.isArray(next.riskAlerts) || !next.riskAlerts.length) {
+    next.riskAlerts = ["AI返答の形式が一部崩れたため、成行エントリーは禁止", "方向一致と反発・反落確認を待つ場面"];
+  }
+
+  if (looksLikeRawJsonText(next.summary)) next.summary = "AI返答の形式が一部崩れたため、安全側で見送り判定に補正しました。";
+  if (String(next.decision || "").toUpperCase() === "WAIT") next.decision = "見送り";
+  if (!next.decision) next.decision = "見送り";
+  if (!next.state || String(next.state).toUpperCase() === "WAIT" || next.state === "待ち") next.state = "方向待ち";
+  next.entryStatus = "WAIT";
+  return next;
+}
+
+function applyUsdShortTermDownTemperatureGuard(result) {
+  if (!result) return result;
+  const next = { ...result };
+  const states = getUsdMacdNumericStates(next);
+  const text = buildUsdAllText(next);
+  const rsi = parseUsdRsiZone(text);
+  const bothShortTermDown = states.m5 === "down" && states.m15 === "down";
+  const rsiWeakNeutral = rsi != null && rsi >= 40 && rsi <= 52;
+  if (!bothShortTermDown || !rsiWeakNeutral) return next;
+
+  const h1Longish = states.h1 === "up" || /1時間足?[^。\n]*(ロング背景|上向き|上昇|反発基調|上向き要素|プラス圏)/.test(text);
+  next.longScore = h1Longish ? 60 : 55;
+  next.shortScore = h1Longish ? 52 : 55;
+  next.confidence = 50;
+  next.decision = h1Longish ? "見送り〜ロング寄り" : "見送り";
+  next.state = "方向待ち / 反発確認待ち";
+  next._usdShortTermDownGuard = h1Longish ? "longish" : "neutral";
+  next.entryStatus = "WAIT";
+  next.summary = `1時間足にロング背景は残るが、5分足・15分足MACDは下向きで短期の方向一致は不足。1分RSIも${rsi}付近でやや弱く、現時点ではロング優勢とは言いにくい。成行エントリーは避け、候補価格帯での反発確認を待つ場面。`;
+  next.riskAlerts = [
+    "5分足・15分足MACDが下向きで、短期の方向一致は不足",
+    `1分RSIは${rsi}付近で中立〜やや弱く、反発確認前の成行ロングは禁止`,
+    "現価格帯はEMA付近で揉み合いやすく追いかけ禁止",
+  ];
+  next.reasons = [
+    h1Longish ? "1時間足にはロング背景が残るが、短期上位足とはまだ揃っていない" : "1時間足の上向き要素は限定的",
+    "5分足MACDはMACD値がシグナル値を下回り、下向き継続",
+    "15分足MACDもMACD値がシグナル値を下回り、短期の下降圧力が残る",
+    `1分足RSIは${rsi}付近でやや弱く、明確な反発はまだ出ていない`,
+  ];
+  return next;
+}
+
+function normalizeUsdWaitContinuationText(text) {
+  if (!text) return text;
+  let value = String(text);
+  const generic = "見送り継続：\n5分・15分MACDの方向が揃わず、1分足で明確な反発・反落サインが出ない場合。";
+  value = value
+    .replace(/見送り継続[:：][^\n]*(?:LONG\/SHORTの点差が10点未満|点差が10点未満)[^。\n]*。?/g, generic)
+    .replace(/見送り継続[:：]\s*LONG\/SHORTの点差が10点未満[\s\S]*$/g, generic)
+    .replace(/LONG\/SHORTの点差が10点未満で方向優位性が弱い/g, "LONG/SHORTの点差が小さく、方向優位性はまだ限定的")
+    .replace(/LONG\/SHORTの点差が10点未満[^。\n]*。?/g, "LONG/SHORTの点差が小さく、方向優位性はまだ限定的。")
+    .replace(/点差が10点未満[^。\n]*。?/g, "点差が小さく、方向優位性はまだ限定的。")
+    .replace(/見送り継続[:：]\s*5分と15分MACDが方向不一致、?または1分足で明確な反発・反落サインが出ない場合。?/g, "見送り継続：\n5分・15分MACDの方向が揃わず、1分足で明確な反発・反落サインが出ない場合。");
+  return value;
+}
+
 function parseUsdRsiZone(text) {
   const s = String(text || "");
   const exact = s.match(/1分(?:足)?RSI(?:は|が|:|：|\s)*約?([0-9]{1,2}(?:\.[0-9]+)?)/);
@@ -1476,9 +1619,9 @@ function applyUsdMacdNumericBias(result) {
   const allDown = [states.h1, states.m15, states.m5].every((v) => v === "down" || v === "flat") && parsed.some((v) => v === "down");
 
   if (allUp) {
-    next.longScore = Math.max(Number(next.longScore || 0), 75);
-    next.shortScore = Math.min(Number(next.shortScore || 45), rsi != null && rsi <= 45 ? 45 : 40);
-    next.confidence = Math.min(Math.max(Number(next.confidence || 0), 60), 65);
+    next.longScore = Math.max(parseSafeScore(next.longScore, 50), 75);
+    next.shortScore = Math.min(parseSafeScore(next.shortScore, 45), rsi != null && rsi <= 45 ? 45 : 40);
+    next.confidence = Math.min(Math.max(parseSafeScore(next.confidence, 50), 60), 65);
     next.decision = "ロング優勢";
     next.state = "押し目買い待ち / 反発確認待ち";
     next.entryStatus = "WAIT";
@@ -1491,9 +1634,9 @@ function applyUsdMacdNumericBias(result) {
         : "1分足RSIの位置を確認し、反発確認前の成行ロングは禁止",
     ];
   } else if (allDown) {
-    next.shortScore = Math.max(Number(next.shortScore || 0), 65);
-    next.longScore = Math.min(Number(next.longScore || 50), 50);
-    next.confidence = Math.min(Math.max(Number(next.confidence || 0), 55), 65);
+    next.shortScore = Math.max(parseSafeScore(next.shortScore, 50), 65);
+    next.longScore = Math.min(parseSafeScore(next.longScore, 50), 50);
+    next.confidence = Math.min(Math.max(parseSafeScore(next.confidence, 50), 55), 65);
     next.decision = "ショート寄り";
     next.state = "戻り売り待ち / 反落確認待ち";
     next.entryStatus = "WAIT";
@@ -1512,16 +1655,21 @@ function normalizeUsdJpyShortText(result) {
 
   // USDJPY短期モードの最終出力直前に通す一括整形。
   // 価格アンカー・ENTRY/TP/STOP価格生成後の文章だけを補正する。
-  let next = polishUsdWaitWordingResult({ ...result });
+  let next = sanitizeUsdJsonFallbackResult({ ...result });
+  next = polishUsdWaitWordingResult(next);
   next = applyUsdMacdNumericBias(next);
+  next = applyUsdShortTermDownTemperatureGuard(next);
+  next.longScore = parseSafeScore(next.longScore, 50);
+  next.shortScore = parseSafeScore(next.shortScore, 50);
+  next.confidence = parseSafeScore(next.confidence, 50);
   const textKeys = ["summary", "risk", "entryTrigger", "entryPlan", "cancelCondition", "takeProfitPlan", "stopPlan"];
-  const long = Number(next.longScore ?? 0);
-  const short = Number(next.shortScore ?? 0);
+  const long = Number(next.longScore);
+  const short = Number(next.shortScore);
   const diff = Math.abs(long - short);
 
   const normalizeText = (text) => {
     if (!text) return text;
-    let value = polishUsdShortModeText(sanitizeDirectionWords(String(text)));
+    let value = normalizeUsdWaitContinuationText(polishUsdShortModeText(sanitizeDirectionWords(String(text))));
 
     value = value
       // MACD色表現を方向表現へ統一
@@ -1608,7 +1756,7 @@ function normalizeUsdJpyShortText(result) {
         .replace(/点差は20点未満/g, `点差は${diff}点`);
     }
 
-    return sortDisplayedPriceRanges(value.trim());
+    return sortDisplayedPriceRanges(normalizeUsdWaitContinuationText(value.trim()));
   };
 
   textKeys.forEach((key) => {
@@ -1635,7 +1783,10 @@ function normalizeUsdJpyShortText(result) {
 
   const signedDiff = long - short;
   if (signedDiff > 0) {
-    if (diff < 15) {
+    if (next._usdShortTermDownGuard === "longish") {
+      next.decision = "見送り〜ロング寄り";
+      next.state = "方向待ち / 反発確認待ち";
+    } else if (diff < 15) {
       next.decision = "見送り";
       next.state = "方向待ち";
     } else if (diff < 20) {
@@ -1696,6 +1847,7 @@ function normalizeUsdJpyShortText(result) {
   if (Array.isArray(next.reasons)) next.reasons = next.reasons.map((v) => normalizeText(v));
   if (Array.isArray(next.riskAlerts)) next.riskAlerts = next.riskAlerts.map((v) => normalizeText(v));
 
+  delete next._usdShortTermDownGuard;
   return next;
 }
 
@@ -1703,7 +1855,7 @@ function normalizeUsdJpyShortText(result) {
 function normalizeServerResult(result, mode = "USDJPY") {
   if (mode === "MXNJPY") return normalizeMxnSwapResult(result);
 
-  const next = { ...result };
+  let next = sanitizeUsdJsonFallbackResult({ ...result });
 
   ["summary", "risk", "entryTrigger", "entryPlan", "cancelCondition", "takeProfitPlan", "stopPlan"].forEach((key) => {
     if (next[key]) next[key] = sanitizeDirectionWords(next[key]);
@@ -1712,9 +1864,12 @@ function normalizeServerResult(result, mode = "USDJPY") {
   if (Array.isArray(next.reasons)) next.reasons = next.reasons.map(sanitizeDirectionWords);
   if (Array.isArray(next.riskAlerts)) next.riskAlerts = next.riskAlerts.map(sanitizeDirectionWords);
 
-  const longScore = Number(next.longScore ?? 0);
-  const shortScore = Number(next.shortScore ?? 0);
-  const confidence = Number(next.confidence ?? 0);
+  next.longScore = parseSafeScore(next.longScore, 50);
+  next.shortScore = parseSafeScore(next.shortScore, 50);
+  next.confidence = parseSafeScore(next.confidence, 50);
+  const longScore = Number(next.longScore);
+  const shortScore = Number(next.shortScore);
+  const confidence = Number(next.confidence);
   const allText = [
     next.decision,
     next.summary,
@@ -1736,6 +1891,8 @@ function normalizeServerResult(result, mode = "USDJPY") {
   const hasMacdMismatch = hasMacdMismatchText(allText);
   const usdRsiZone = rsi ?? parseUsdRsiZone(allText);
   const usdDiff = Math.abs(longScore - shortScore);
+
+  next = applyUsdShortTermDownTemperatureGuard(next);
 
   if (usdRsiZone != null && usdRsiZone >= 30 && usdRsiZone <= 35) {
     next.summary = "1時間足にはロング背景が残るが、15分足・5分足はまだ方向が完全には揃っていない。1分RSIは30台前半まで低下しており、追い売りは危険だが、反発確定前の成行ロングも禁止。現在は押し目候補だが、1分足の陽線確定・短期EMA回復・5分MACDの上向き維持を確認したい場面。";
@@ -1848,13 +2005,13 @@ function normalizeServerResult(result, mode = "USDJPY") {
   if (String(next.decision || "").includes("ロング") && rsi != null && rsi >= 70) {
     next.state = "押し目買い待ち";
     next.entryStatus = "WAIT";
-    next.confidence = Math.min(Number(next.confidence ?? 70), 70);
+    next.confidence = Math.min(parseSafeScore(next.confidence, 70), 70);
   }
 
   if (String(next.decision || "").includes("ショート") && rsi != null && rsi <= 30) {
     next.state = "戻り売り待ち";
     next.entryStatus = "WAIT";
-    next.confidence = Math.min(Number(next.confidence ?? 70), 70);
+    next.confidence = Math.min(parseSafeScore(next.confidence, 70), 70);
   }
 
   if (
@@ -3868,17 +4025,20 @@ app.post(
         result = JSON.parse(jsonText);
       } catch {
         result = {
-          decision: "WAIT",
+          decision: "見送り",
           entryStatus: "WAIT",
-          longScore: 0,
-          shortScore: 0,
-          confidence: 0,
-          summary: "AIの返答をJSONとして読み取れませんでした。",
-          reasons: [text],
-          risk: "再度スクショを入れ直してください。",
-          entryPlan: "見送り",
-          takeProfitPlan: "なし",
-          stopPlan: "なし",
+          longScore: 50,
+          shortScore: 50,
+          confidence: 50,
+          summary: "AI返答の形式が崩れたため、安全側で見送り判定に補正しました。",
+          reasons: ["AI返答の形式が一部崩れたため、安全側で見送り判定に補正"],
+          risk: "成行エントリーは禁止。方向一致と反発・反落確認を待つ場面。",
+          riskAlerts: ["AI返答の形式が一部崩れたため、成行エントリーは禁止", "方向一致と反発・反落確認を待つ場面"],
+          entryPlan: "新規成行禁止。方向一致と反発・反落確認まで見送り。",
+          entryTrigger: "新規成行禁止。方向一致と反発・反落確認まで見送り。",
+          cancelCondition: "見送り継続：短期足の方向一致、または1分足の反発・反落確定サインが出ない場合。",
+          takeProfitPlan: "TP1は短期利確候補。反発/反落が強い場合のみTP2以降を検討。",
+          stopPlan: "候補価格確定後に設定。",
         };
       }
 
