@@ -1003,6 +1003,121 @@ function ensureUsdShortTakeProfitText(text, result) {
   return `${value}\n\nRR目安：\nTP1は短期利確候補。反発/反落が強く、5分足の方向が維持される場合のみTP2以降を検討。`.trim();
 }
 
+function hasConcreteUsdPriceText(text) {
+  return /\b[0-9]{3}\.[0-9]{3,4}\b/.test(String(text || ""));
+}
+
+function hasAbstractUsdPriceText(text) {
+  return /現在値付近|直近戻り高値|浅い上値節目|下値支持|上値抵抗|候補価格確定後|ENTRY価格|STOP位置|価格確定後|次の上値|深めの下値|浅い押し目|浅い下値|直近押し安値|直近戻り高値/.test(String(text || ""));
+}
+
+function isUsdPriceTooFarFromAnchor(price, anchor, limit = 0.100) {
+  return Number.isFinite(price) && Number.isFinite(anchor) && Math.abs(price - anchor) > limit;
+}
+
+function buildUsdDisplayLevels(result) {
+  const current = estimateUsdCurrentPrice(result);
+  return {
+    current,
+    longLow: current - 0.010,
+    longHigh: current,
+    longDeepLow: current - 0.035,
+    longDeepHigh: current - 0.010,
+    shortLow: current + 0.010,
+    shortHigh: current + 0.025,
+    longTp1: current + 0.015,
+    longTp2: current + 0.030,
+    longExt: current + 0.055,
+    shortTp1: current - 0.015,
+    shortTp2: current - 0.035,
+    shortExt: current - 0.055,
+    longSl1: current - 0.015,
+    longSl2: current - 0.025,
+    shortSl1: current + 0.035,
+    shortSl2: current + 0.055,
+  };
+}
+
+function buildUsdConcreteEntryText(result) {
+  const p = buildUsdDisplayLevels(result);
+  return `新規成行禁止。
+ロング候補：
+${formatPrice(p.longLow)}〜${formatPrice(p.longHigh)}付近で下げ止まり、1分RSIが40〜50から反発し、陽線確定した場合に検討。
+深押し候補：
+${formatPrice(p.longDeepLow)}〜${formatPrice(p.longDeepHigh)}付近まで押しても、5分・15分MACDの方向が大きく崩れず、1分RSI40〜50から反発する場合に検討。
+ショート候補：
+${formatPrice(p.shortLow)}〜${formatPrice(p.shortHigh)}付近で上値が重くなり、1分RSIが50〜60から反落し、陰線確定した場合のみ短期調整狙いとして検討。`;
+}
+
+function buildUsdConcreteTakeProfitText(result) {
+  const p = buildUsdDisplayLevels(result);
+  return `ロング時：
+TP1：${formatPrice(p.longTp1)}付近
+TP2：${formatPrice(p.longTp2)}付近
+伸びた場合：${formatPrice(p.longExt)}付近
+
+ショート時：
+TP1：${formatPrice(p.shortTp1)}付近
+TP2：${formatPrice(p.shortTp2)}付近
+伸びた場合：${formatPrice(p.shortExt)}付近
+
+RR目安：
+TP1は短期利確候補。反発/反落が強く、5分足の方向が維持される場合のみTP2以降を検討。`;
+}
+
+function buildUsdConcreteStopText(result) {
+  const p = buildUsdDisplayLevels(result);
+  return `ロング時：
+第一SL：${formatPrice(p.longSl1)}割れ
+深めSL：${formatPrice(p.longSl2)}割れ
+撤退条件：5分MACDが下向き転換し、1分RSIが50を下回る場合。
+
+ショート時：
+第一SL：${formatPrice(p.shortSl1)}上抜け
+深めSL：${formatPrice(p.shortSl2)}上抜け
+撤退条件：5分MACDが上向き継続し、1分RSI50以上でEMA帯を維持する場合。`;
+}
+
+function buildUsdConcreteCancelText(result, existingText = "") {
+  const p = buildUsdDisplayLevels(result);
+  const base = String(existingText || "");
+  const keepWait = base.match(/見送り継続[:：][\s\S]*$/)?.[0] || "見送り継続：5分・15分MACDの方向が揃わず、1分RSIで反発・反落サインが出ない間。";
+  return `ロング候補取消：
+${formatPrice(p.longSl1)}を明確に割り込み、さらに${formatPrice(p.longSl2)}を下抜ける場合。または5分MACDが下向き継続し、1分RSIが50を下回る場合。
+ショート候補取消：
+${formatPrice(p.shortSl1)}〜${formatPrice(p.shortSl2)}を明確に上抜け、または5分MACDが上向き継続し、1分RSIが50以上を維持する場合。
+${keepWait}`;
+}
+
+function hasInvalidUsdShortSidePrices(result) {
+  const current = estimateUsdCurrentPrice(result);
+  const text = `${result?.entryTrigger || ""}\n${result?.takeProfitPlan || ""}\n${result?.stopPlan || ""}\n${result?.cancelCondition || ""}`;
+  const prices = collectUsdPrices(text);
+  return prices.some((price) => isUsdPriceTooFarFromAnchor(price, current, 0.120));
+}
+
+function ensureUsdConcretePriceText(result) {
+  if (!result) return result;
+  const next = { ...result };
+  const combined = [next.entryTrigger, next.entryPlan, next.takeProfitPlan, next.stopPlan, next.cancelCondition].filter(Boolean).join("\n");
+  const needsConcrete =
+    !hasConcreteUsdPriceText(next.entryTrigger || next.entryPlan || "") ||
+    !hasConcreteUsdPriceText(next.takeProfitPlan || "") ||
+    !hasConcreteUsdPriceText(next.stopPlan || "") ||
+    hasAbstractUsdPriceText(combined) ||
+    hasInvalidUsdShortSidePrices(next);
+
+  if (!needsConcrete) return next;
+
+  next.entryTrigger = buildUsdConcreteEntryText(next);
+  next.cancelCondition = buildUsdConcreteCancelText(next, next.cancelCondition);
+  next.takeProfitPlan = buildUsdConcreteTakeProfitText(next);
+  next.stopPlan = buildUsdConcreteStopText(next);
+  return next;
+}
+
+
+
 function normalizeUsdHighRsiShortSide(result) {
   if (!result) return result;
   const next = { ...result };
@@ -1185,10 +1300,16 @@ function normalizeUsdJpyShortText(result) {
       .replace(/上向きで上向き転換気味/g, "上向き転換気味")
       .replace(/下向きで下向き継続気味の状態/g, "下向き継続気味")
       .replace(/下向きで下向き転換気味/g, "下向き転換気味")
+      .replace(/上向き傾向の弱気圏/g, "上向き転換気味")
+      .replace(/下向き傾向の弱気圏/g, "下向き継続")
+      .replace(/弱い下向き継続/g, "下向き継続")
       .replace(/上向き傾向へ上向き継続/g, "上向き継続")
       .replace(/下向き傾向へ下向き継続/g, "下向き継続")
       .replace(/上向き傾向上向き継続/g, "上向き継続")
       .replace(/下向き傾向下向き継続/g, "下向き継続")
+      .replace(/上向き傾向の上向き継続/g, "上向き継続")
+      .replace(/下向き傾向の下向き継続/g, "下向き継続")
+      .replace(/下向き傾向で弱い下向き継続/g, "下向き継続")
       .replace(/上向き傾向に転換し上向き/g, "上向き転換気味")
       .replace(/下向き傾向に転換し下向き/g, "下向き転換")
       .replace(/上向き転換し上向き/g, "上向き転換気味")
@@ -1252,12 +1373,18 @@ function normalizeUsdJpyShortText(result) {
     next.state = "押し目買い待ち / 反発確認待ち";
   }
 
+  // USDJPY短期モードでは、最終表示でENTRY/TP/STOPの具体的価格を必ず残す。
+  next = ensureUsdConcretePriceText(next);
+
   // ショート候補があるUSDJPYでは、TP/STOPも必ずセットで最後に整える。
   if (hasUsdShortCandidateText(next)) {
     next.takeProfitPlan = ensureUsdShortTakeProfitText(next.takeProfitPlan, next);
     next.stopPlan = replaceUsdShortStopText(next.stopPlan, next);
     next.cancelCondition = replaceUsdShortCancelText(next.cancelCondition, next);
   }
+
+  // 価格補正後にもう一度、抽象化や価格飛びが残っていれば具体価格へ戻す。
+  next = ensureUsdConcretePriceText(next);
 
   // TP欄はRR目安を1回だけにする。
   if (next.takeProfitPlan) {

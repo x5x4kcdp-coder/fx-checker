@@ -962,6 +962,86 @@ function extractSinglePrices(text, limit = 3) {
   return [...new Set(matches)].slice(0, limit);
 }
 
+
+function extractSectionText(text, label) {
+  const source = String(text || "");
+  const labels = ["ロング候補", "深押し候補", "第二候補", "ショート候補", "回復確認候補", "見送り条件"];
+  const startPattern = new RegExp(`${label}[:：]?`);
+  const startMatch = source.match(startPattern);
+  if (!startMatch) return "";
+  const start = startMatch.index + startMatch[0].length;
+  let end = source.length;
+  for (const other of labels.filter((v) => v !== label)) {
+    const re = new RegExp(`\\n?${other}[:：]?`, "g");
+    re.lastIndex = start;
+    const match = re.exec(source);
+    if (match && match.index > start && match.index < end) end = match.index;
+  }
+  return source.slice(start, end).trim();
+}
+
+function extractFirstPriceRangeFromSection(text, label) {
+  const section = extractSectionText(text, label);
+  return extractPriceRanges(section, 1)[0] || "";
+}
+
+function extractUsdEntryHighlightRanges(entryText) {
+  const longFirst = extractFirstPriceRangeFromSection(entryText, "ロング候補") || extractPriceRanges(entryText, 1)[0] || "";
+  const longSecond = extractFirstPriceRangeFromSection(entryText, "深押し候補") || extractFirstPriceRangeFromSection(entryText, "第二候補") || "";
+  const shortFirst = extractFirstPriceRangeFromSection(entryText, "ショート候補") || "";
+  return { longFirst, longSecond, shortFirst };
+}
+
+function buildUsdHighlightCards({ entryText, direction, result }) {
+  const { longFirst, longSecond, shortFirst } = extractUsdEntryHighlightRanges(entryText);
+  const cards = [];
+  const isShort = String(direction || "").includes("ショート");
+  const isLong = String(direction || "").includes("ロング");
+  const isWait = String(direction || "").includes("見送り") || String(result?.statusText || "").includes("方向待ち");
+
+  const longCard = longFirst ? {
+    title: "ロング第一候補",
+    price: longFirst,
+    condition: "押し目で下げ止まり",
+    confirm: "1分RSI40〜50から反発 / 陽線確定",
+  } : null;
+  const longSecondCard = longSecond ? {
+    title: "ロング第二候補",
+    price: longSecond,
+    condition: "深め押し後に下げ止まり",
+    confirm: "1分RSI40〜50から反発 / 上位足維持",
+  } : null;
+  const shortCard = shortFirst ? {
+    title: "ショート第一候補",
+    price: shortFirst,
+    condition: "戻り後に上値が重い",
+    confirm: "1分RSI50〜60から反落 / 陰線確定",
+  } : null;
+
+  if (isShort) {
+    if (shortCard) cards.push(shortCard);
+    if (longCard) cards.push({ ...longCard, title: "ロング候補" });
+  } else if (isLong) {
+    if (longCard) cards.push(longCard);
+    if (longSecondCard) cards.push(longSecondCard);
+    if (shortCard) cards.push(shortCard);
+  } else if (isWait) {
+    if (longCard) cards.push({ ...longCard, title: "ロング候補" });
+    if (shortCard) cards.push({ ...shortCard, title: "ショート候補" });
+    cards.push({
+      title: "見送り理由",
+      price: "条件待ち",
+      condition: "方向優位性が弱い",
+      confirm: "5分・15分MACDの一致待ち",
+    });
+  } else {
+    if (longCard) cards.push(longCard);
+    if (shortCard) cards.push(shortCard);
+  }
+
+  return cards.slice(0, 3);
+}
+
 function deriveNowAction({ normalizedAiResult, result, entryCard }) {
   if (!normalizedAiResult) return null;
 
@@ -1131,32 +1211,12 @@ function deriveEntryHighlights({ normalizedAiResult, entryCard, result, mode }) 
     return cards.slice(0, 3);
   }
 
-  if (direction.includes("ショート") || entryText.includes("ショート")) {
-    cards.push({
-      title: "ショート第一候補",
-      price: ranges[0] || "直近戻り高値付近",
-      condition: entryText.match(/RSI[^、。\n]*(?:反落|戻り)/)?.[0] || "RSI50〜60から反落",
-      confirm: entryText.includes("EMA") ? "陰線確定 / EMA短期線下抜け" : "陰線確定",
-    });
-    if (ranges[1]) {
-      cards.push({ title: "ショート第二候補", price: ranges[1], condition: "深め戻し後に上値が重い", confirm: "反落確認" });
-    }
-  }
-
-  if (direction.includes("ロング") || entryText.includes("ロング")) {
-    cards.push({
-      title: "ロング第一候補",
-      price: ranges[0] || "現在値付近の浅い押し目",
-      condition: entryText.match(/RSI[^、。\n]*(?:反発|落ち着き)/)?.[0] || "RSI40〜55から反発",
-      confirm: entryText.includes("陽線") ? "陽線確定 / 5分MACD上向き維持" : "反発確認",
-    });
-    if (ranges[1]) {
-      cards.push({ title: "ロング第二候補", price: ranges[1], condition: "深め押し後に下げ止まり", confirm: "陽線確定 / 上位足維持" });
-    }
-  }
+  const usdCards = buildUsdHighlightCards({ entryText, direction, result });
+  if (usdCards.length > 0) return usdCards;
 
   return cards.slice(0, 3);
 }
+
 
 function buildDisplayResult({ normalizedAiResult, answers, mode }) {
   if (normalizedAiResult) {
