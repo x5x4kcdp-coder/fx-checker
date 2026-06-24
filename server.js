@@ -813,6 +813,9 @@ function estimateUsdCurrentPrice(result) {
   const closeAnchor = extractUsdClosePriceFromText(text);
   if (closeAnchor != null) return closeAnchor;
 
+  const entryAnchor = estimateUsdCurrentPriceFromEntry(result);
+  if (entryAnchor != null) return entryAnchor;
+
   const prices = collectUsdPrices(text);
   if (!prices.length) return 161.604;
 
@@ -1016,7 +1019,11 @@ function isUsdPriceTooFarFromAnchor(price, anchor, limit = 0.100) {
 }
 
 function buildUsdDisplayLevels(result) {
-  const current = estimateUsdCurrentPrice(result);
+  const override = Number(result?.__usdCurrentAnchor);
+  const estimated = Number.isFinite(override) && override >= 100 && override <= 200
+    ? override
+    : estimateUsdCurrentPrice(result);
+  const current = Number.isFinite(estimated) ? Number(estimated.toFixed(3)) : 161.604;
   return {
     current,
     longLow: current - 0.010,
@@ -1096,6 +1103,135 @@ function hasInvalidUsdShortSidePrices(result) {
   return prices.some((price) => isUsdPriceTooFarFromAnchor(price, current, 0.120));
 }
 
+
+function extractUsdLongCandidateRange(result) {
+  const text = String(result?.entryTrigger || result?.entryPlan || "");
+  const match = text.match(/ロング候補[:：]?([\s\S]*?)(?=\n?深押し候補[:：]|\n?ショート候補[:：]|\n?見送り条件[:：]|$)/);
+  const target = match ? match[1] : text;
+  const range = target.match(/([0-9]{3}\.[0-9]{3,4})\s*[〜~～]\s*([0-9]{3}\.[0-9]{3,4})/);
+  if (!range) return null;
+  const a = Number(range[1]);
+  const b = Number(range[2]);
+  if (!Number.isFinite(a) || !Number.isFinite(b)) return null;
+  return { low: Math.min(a, b), high: Math.max(a, b) };
+}
+
+function estimateUsdCurrentPriceFromEntry(result) {
+  const longRange = extractUsdLongCandidateRange(result);
+  if (longRange && longRange.high - longRange.low > 0 && longRange.high - longRange.low <= 0.080) {
+    return Number(longRange.high.toFixed(3));
+  }
+
+  const shortRange = extractUsdShortCandidateRange(result);
+  if (shortRange && shortRange.high - shortRange.low > 0 && shortRange.high - shortRange.low <= 0.100) {
+    return Number((shortRange.low - 0.010).toFixed(3));
+  }
+
+  return null;
+}
+
+function getUsdSection(text, startLabel, stopLabels = []) {
+  const source = String(text || "");
+  const escapedStart = startLabel.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const startMatch = source.match(new RegExp(`${escapedStart}[:：]?`));
+  if (!startMatch) return "";
+  const start = (startMatch.index || 0) + startMatch[0].length;
+  let end = source.length;
+  for (const label of stopLabels) {
+    const escaped = label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const m = source.slice(start).match(new RegExp(`\\n?${escaped}[:：]`));
+    if (m && m.index != null) end = Math.min(end, start + m.index);
+  }
+  return source.slice(start, end);
+}
+
+function getUsdLongTakeProfitPrices(result) {
+  return collectUsdPrices(getUsdSection(result?.takeProfitPlan || "", "ロング時", ["ショート時", "RR目安"]));
+}
+
+function getUsdShortTakeProfitPrices(result) {
+  return collectUsdPrices(getUsdSection(result?.takeProfitPlan || "", "ショート時", ["RR目安"]));
+}
+
+function getUsdLongStopPrices(result) {
+  return collectUsdPrices(getUsdSection(result?.stopPlan || "", "ロング時", ["ショート時"]));
+}
+
+function getUsdShortStopPrices(result) {
+  return collectUsdPrices(getUsdSection(result?.stopPlan || "", "ショート時", []));
+}
+
+function getUsdLongCancelPrices(result) {
+  return collectUsdPrices(getUsdSection(result?.cancelCondition || "", "ロング候補取消", ["ショート候補取消", "見送り継続"]));
+}
+
+function getUsdShortCancelPrices(result) {
+  return collectUsdPrices(getUsdSection(result?.cancelCondition || "", "ショート候補取消", ["見送り継続"]));
+}
+
+function hasInvalidUsdPriceRelations(result) {
+  const longRange = extractUsdLongCandidateRange(result);
+  const shortRange = extractUsdShortCandidateRange(result);
+  const entryAnchor = estimateUsdCurrentPriceFromEntry(result);
+  const current = entryAnchor != null ? entryAnchor : estimateUsdCurrentPrice(result);
+
+  const displayedPrices = collectUsdPrices([
+    result?.entryTrigger,
+    result?.entryPlan,
+    result?.cancelCondition,
+    result?.takeProfitPlan,
+    result?.stopPlan,
+  ].filter(Boolean).join("\n"));
+
+  if (Number.isFinite(current) && displayedPrices.some((price) => isUsdPriceTooFarFromAnchor(price, current, 0.100))) {
+    return true;
+  }
+
+  if (longRange) {
+    const longTp = getUsdLongTakeProfitPrices(result);
+    const longStop = getUsdLongStopPrices(result);
+    const longCancel = getUsdLongCancelPrices(result);
+
+    if (longTp.length && longTp.some((price) => price <= longRange.high)) return true;
+    if (longStop.length && longStop.some((price) => price >= longRange.low)) return true;
+    if (longCancel.length && longCancel.some((price) => price >= longRange.low)) return true;
+  }
+
+  if (shortRange) {
+    const shortTp = getUsdShortTakeProfitPrices(result);
+    const shortStop = getUsdShortStopPrices(result);
+    const shortCancel = getUsdShortCancelPrices(result);
+
+    if (shortTp.length && shortTp.some((price) => price >= shortRange.low)) return true;
+    if (shortStop.length && shortStop.some((price) => price <= shortRange.high)) return true;
+    if (shortCancel.length && shortCancel.some((price) => price <= shortRange.high)) return true;
+  }
+
+  return false;
+}
+
+function rebuildUsdJpyLevelsFromCurrentPrice(result, currentPrice) {
+  const anchor = Number(currentPrice);
+  if (!Number.isFinite(anchor) || anchor < 100 || anchor > 200) return result;
+
+  const next = { ...result, __usdCurrentAnchor: Number(anchor.toFixed(3)) };
+  next.entryTrigger = buildUsdConcreteEntryText(next);
+  next.cancelCondition = buildUsdConcreteCancelText(next, next.cancelCondition);
+  next.takeProfitPlan = buildUsdConcreteTakeProfitText(next);
+  next.stopPlan = buildUsdConcreteStopText(next);
+  delete next.__usdCurrentAnchor;
+  return next;
+}
+
+function validateUsdJpyPriceRelations(result) {
+  if (!result) return result;
+  const current = estimateUsdCurrentPriceFromEntry(result) ?? estimateUsdCurrentPrice(result);
+  if (hasInvalidUsdPriceRelations(result)) {
+    return rebuildUsdJpyLevelsFromCurrentPrice(result, current);
+  }
+  return result;
+}
+
 function ensureUsdConcretePriceText(result) {
   if (!result) return result;
   const next = { ...result };
@@ -1105,7 +1241,8 @@ function ensureUsdConcretePriceText(result) {
     !hasConcreteUsdPriceText(next.takeProfitPlan || "") ||
     !hasConcreteUsdPriceText(next.stopPlan || "") ||
     hasAbstractUsdPriceText(combined) ||
-    hasInvalidUsdShortSidePrices(next);
+    hasInvalidUsdShortSidePrices(next) ||
+    hasInvalidUsdPriceRelations(next);
 
   if (!needsConcrete) return next;
 
@@ -1337,11 +1474,17 @@ function normalizeUsdJpyShortText(result) {
       .replace(/。\s*。/g, "。")
       .replace(/付近付近/g, "付近");
 
-    if (diff === 20) {
+    if (diff >= 10) {
+      const diffMessage = diff >= 20
+        ? `LONG/SHORTの点差は${diff}点で、方向優位性はあるが強くはない`
+        : `LONG/SHORTの点差は${diff}点で、方向優位性はまだ限定的`;
       value = value
-        .replace(/LONG\/SHORTの点差は20点未満で方向優位性はやや限定的/g, "LONG/SHORTの点差は20点で、方向優位性はあるが強くはない")
-        .replace(/LONG\/SHORTの点差は20点未満/g, "LONG/SHORTの点差は20点")
-        .replace(/点差は20点未満/g, "点差は20点");
+        .replace(/LONG\/SHORTの点差が10点未満で方向優位性が弱い/g, diffMessage)
+        .replace(/LONG\/SHORTの点差が10点未満/g, `LONG/SHORTの点差は${diff}点`)
+        .replace(/LONG\/SHORTの点差は20点未満で方向優位性はやや限定的/g, diffMessage)
+        .replace(/LONG\/SHORTの点差は20点未満/g, `LONG/SHORTの点差は${diff}点`)
+        .replace(/点差が10点未満/g, `点差は${diff}点`)
+        .replace(/点差は20点未満/g, `点差は${diff}点`);
     }
 
     return sortDisplayedPriceRanges(value.trim());
@@ -1369,8 +1512,41 @@ function normalizeUsdJpyShortText(result) {
     next.entryStatus = "WAIT";
   }
 
-  if (long - short >= 20 && String(next.state || "").includes("方向待ち")) {
-    next.state = "押し目買い待ち / 反発確認待ち";
+  const signedDiff = long - short;
+  if (signedDiff > 0) {
+    if (diff < 15) {
+      next.decision = "見送り";
+      next.state = "方向待ち";
+    } else if (diff < 20) {
+      next.decision = "見送り〜ロング寄り";
+      next.state = "方向待ち / 反発確認待ち";
+    } else if (diff < 30) {
+      next.decision = "ロング寄り";
+      next.state = "押し目買い待ち / 反発確認待ち";
+    } else {
+      next.decision = "ロング優勢";
+      next.state = "押し目買い待ち / 反発確認待ち";
+    }
+    next.entryStatus = "WAIT";
+  } else if (signedDiff < 0) {
+    if (diff < 15) {
+      next.decision = "見送り";
+      next.state = "方向待ち";
+    } else if (diff < 20) {
+      next.decision = "見送り〜ショート寄り";
+      next.state = "方向待ち / 反落確認待ち";
+    } else if (diff < 30) {
+      next.decision = "ショート寄り";
+      next.state = "戻り売り待ち / 反落確認待ち";
+    } else {
+      next.decision = "ショート優勢";
+      next.state = "戻り売り待ち / 反落確認待ち";
+    }
+    next.entryStatus = "WAIT";
+  } else {
+    next.decision = "見送り";
+    next.state = "方向待ち";
+    next.entryStatus = "WAIT";
   }
 
   // USDJPY短期モードでは、最終表示でENTRY/TP/STOPの具体的価格を必ず残す。
@@ -1385,6 +1561,10 @@ function normalizeUsdJpyShortText(result) {
 
   // 価格補正後にもう一度、抽象化や価格飛びが残っていれば具体価格へ戻す。
   next = ensureUsdConcretePriceText(next);
+
+  // 最終表示直前にENTRY/CANCEL/TP/STOPの上下関係を検証。
+  // 1つでも崩れていれば、現在値アンカーから全価格を再生成する。
+  next = validateUsdJpyPriceRelations(next);
 
   // TP欄はRR目安を1回だけにする。
   if (next.takeProfitPlan) {
