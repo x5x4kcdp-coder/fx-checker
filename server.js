@@ -8,6 +8,7 @@ dotenv.config();
 
 const app = express();
 const upload = multer({ storage: multer.memoryStorage() });
+const BUILD_VERSION = "v31-usdjpy-anchor-macd";
 
 app.use(cors());
 app.use(express.json({ limit: "20mb" }));
@@ -518,7 +519,7 @@ function polishMxnNarrativeTone(text, levels = null, scoreState = null) {
 function buildMxnSummaryFromLevels(levels, scoreState) {
   if (!levels) return null;
   if (levels.deepBelowBuySummary || Number(scoreState?.short || 0) > Number(scoreState?.long || 0)) {
-    return `日足の上昇背景は残るものの、現在は深い押し目に入っている。4時間足・1時間足・短期足は下向きで、買サマリ${levels.buySummary}付近を大きく下回っている。現在値は${levels.currentPrice}付近で、短期は下向きで下落リスクが残る。ただしMXNJPYスワップ押し目モードではショート優先ではなく、反発確認待ちが妥当。短期RSIは未確認のため断定せず、短期足の下げ止まり・陽線確定・EMA帯回復を待つ場面。`;
+    return `日足の上昇背景は残るものの、現在は深い押し目に入っている。4時間足・1時間足・短期足は下向きで、買サマリ${levels.buySummary}付近を大きく下回っている。現在値は${levels.currentPrice}付近で、短期は下向きで下落リスクが残る。ただし現在は下落リスクが残るため、買い急がず反発確認待ちが妥当。短期RSIは未確認のため断定せず、短期足の下げ止まり・陽線確定・EMA帯回復を待つ場面。`;
   }
   if (levels.shallowBelowBuySummary) {
     return `日足の上昇背景は残るものの、現在は押し目確認中。4時間足・1時間足・短期足は調整中で、買サマリ${levels.buySummary}付近をまだ回復できていない。現在値は${levels.currentPrice}付近で、短期の反発確認はまだ不足。短期RSIは未確認のため断定せず、短期足の下げ止まり・陽線確定・EMA帯回復を待つ場面。`;
@@ -775,22 +776,33 @@ function collectUsdPrices(text) {
     .filter((v) => Number.isFinite(v) && v >= 100 && v <= 200);
 }
 
+function medianUsdPrice(values) {
+  const nums = values
+    .map((v) => Number(v))
+    .filter((v) => Number.isFinite(v) && v >= 100 && v <= 200)
+    .sort((a, b) => a - b);
+  if (!nums.length) return null;
+  const mid = Math.floor(nums.length / 2);
+  const median = nums.length % 2 ? nums[mid] : (nums[mid - 1] + nums[mid]) / 2;
+  return Number(median.toFixed(3));
+}
+
 function extractUsdClosePriceFromText(text) {
   const s = String(text || "");
-  const closeMatches = [...s.matchAll(/(?:1分足|5分足|15分足|1時間足|終値)?\s*(?:終|終値)\s*[:：]\s*([0-9]{3}\.[0-9]{3,4})/g)]
-    .map((m) => Number(m[1]))
-    .filter((v) => Number.isFinite(v) && v >= 100 && v <= 200);
-  if (closeMatches.length) {
-    const sorted = [...closeMatches].sort((a, b) => a - b);
-    const mid = Math.floor(sorted.length / 2);
-    const median = sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
-    return Number(median.toFixed(3));
-  }
+  const closeMatches = [...s.matchAll(/(?:1分足|5分足|15分足|1時間足|終値)?\s*(?:終|終値)\s*[:：]\s*([0-9]{3}\.[0-9]{3,4})/g)].map((m) => m[1]);
+  return medianUsdPrice(closeMatches);
+}
 
-  const currentMatch = s.match(/(?:現在値アンカー|現在値|現在価格|終値)\s*(?:は|が|:|：|=|＝|\s)\s*([0-9]{3}\.[0-9]{3,4})/);
-  if (currentMatch) return Number(Number(currentMatch[1]).toFixed(3));
+function extractUsdCurrentLabelPriceFromText(text) {
+  const s = String(text || "");
+  const matches = [...s.matchAll(/(?:現在値アンカー|現在値|現在価格|右側(?:の)?現在値(?:ラベル)?|価格ラベル)\s*(?:は|が|:|：|=|＝|\s)\s*([0-9]{3}\.[0-9]{3,4})/g)].map((m) => m[1]);
+  return medianUsdPrice(matches);
+}
 
-  return null;
+function extractUsdStartPriceFromText(text) {
+  const s = String(text || "");
+  const matches = [...s.matchAll(/(?:1分足|5分足|15分足|1時間足|始値)?\s*(?:始|始値)\s*[:：]\s*([0-9]{3}\.[0-9]{3,4})/g)].map((m) => m[1]);
+  return medianUsdPrice(matches);
 }
 
 function estimateUsdCurrentPrice(result) {
@@ -807,11 +819,19 @@ function estimateUsdCurrentPrice(result) {
     Array.isArray(result?.riskAlerts) ? result.riskAlerts.join(" ") : result?.riskAlerts,
   ].filter(Boolean).join(" ");
 
-  const directCurrent = Number(result?.currentPrice);
-  if (Number.isFinite(directCurrent) && directCurrent >= 100 && directCurrent <= 200) return Number(directCurrent.toFixed(3));
-
+  // v31: USDJPYの現在値アンカーはスクショ由来の終値/現在値ラベルを最優先にする。
+  // AIが生成したENTRY/TP/STOP価格から現在値を逆算しない。
   const closeAnchor = extractUsdClosePriceFromText(text);
   if (closeAnchor != null) return closeAnchor;
+
+  const currentLabelAnchor = extractUsdCurrentLabelPriceFromText(text);
+  if (currentLabelAnchor != null) return currentLabelAnchor;
+
+  const startAnchor = extractUsdStartPriceFromText(text);
+  if (startAnchor != null) return startAnchor;
+
+  const directCurrent = Number(result?.currentPrice);
+  if (Number.isFinite(directCurrent) && directCurrent >= 100 && directCurrent <= 200) return Number(directCurrent.toFixed(3));
 
   const entryAnchor = estimateUsdCurrentPriceFromEntry(result);
   if (entryAnchor != null) return entryAnchor;
@@ -1172,8 +1192,7 @@ function getUsdShortCancelPrices(result) {
 function hasInvalidUsdPriceRelations(result) {
   const longRange = extractUsdLongCandidateRange(result);
   const shortRange = extractUsdShortCandidateRange(result);
-  const entryAnchor = estimateUsdCurrentPriceFromEntry(result);
-  const current = entryAnchor != null ? entryAnchor : estimateUsdCurrentPrice(result);
+  const current = estimateUsdCurrentPrice(result);
 
   const displayedPrices = collectUsdPrices([
     result?.entryTrigger,
@@ -1186,6 +1205,8 @@ function hasInvalidUsdPriceRelations(result) {
   if (Number.isFinite(current) && displayedPrices.some((price) => isUsdPriceTooFarFromAnchor(price, current, 0.100))) {
     return true;
   }
+  if (Number.isFinite(current) && longRange && (Math.abs(longRange.low - current) > 0.050 || Math.abs(longRange.high - current) > 0.050)) return true;
+  if (Number.isFinite(current) && shortRange && (Math.abs(shortRange.low - current) > 0.050 || Math.abs(shortRange.high - current) > 0.050)) return true;
 
   if (longRange) {
     const longTp = getUsdLongTakeProfitPrices(result);
@@ -1225,7 +1246,7 @@ function rebuildUsdJpyLevelsFromCurrentPrice(result, currentPrice) {
 
 function validateUsdJpyPriceRelations(result) {
   if (!result) return result;
-  const current = estimateUsdCurrentPriceFromEntry(result) ?? estimateUsdCurrentPrice(result);
+  const current = estimateUsdCurrentPrice(result);
   if (hasInvalidUsdPriceRelations(result)) {
     return rebuildUsdJpyLevelsFromCurrentPrice(result, current);
   }
@@ -1387,12 +1408,112 @@ function polishUsdWaitWordingResult(result) {
 }
 
 
+
+function buildUsdAllText(result) {
+  return [
+    result?.currentPrice,
+    result?.summary,
+    result?.risk,
+    result?.entryTrigger,
+    result?.entryPlan,
+    result?.cancelCondition,
+    result?.takeProfitPlan,
+    result?.stopPlan,
+    Array.isArray(result?.reasons) ? result.reasons.join(" ") : result?.reasons,
+    Array.isArray(result?.riskAlerts) ? result.riskAlerts.join(" ") : result?.riskAlerts,
+    result?.macdSnapshot ? JSON.stringify(result.macdSnapshot) : "",
+    result?.macdValues ? JSON.stringify(result.macdValues) : "",
+  ].filter(Boolean).join("\n");
+}
+
+function extractUsdMacdPairFromText(text, labels) {
+  const source = String(text || "");
+  const labelPattern = labels.join("|");
+  const patterns = [
+    new RegExp(`(?:${labelPattern})[^\\n。]*?MACD[^-0-9]*(-?\\d+(?:\\.\\d+)?)[^\\n。]*?(?:シグナル|signal)[^-0-9]*(-?\\d+(?:\\.\\d+)?)`, "i"),
+    new RegExp(`(?:${labelPattern})[^\\n。]*?(?:シグナル|signal)[^-0-9]*(-?\\d+(?:\\.\\d+)?)[^\\n。]*?MACD[^-0-9]*(-?\\d+(?:\\.\\d+)?)`, "i"),
+  ];
+  for (const pattern of patterns) {
+    const m = source.match(pattern);
+    if (m) {
+      const a = Number(m[1]);
+      const b = Number(m[2]);
+      if (Number.isFinite(a) && Number.isFinite(b)) {
+        // 2つ目のパターンはシグナル→MACDの順で拾うため反転する。
+        return pattern === patterns[1] ? { macd: b, signal: a } : { macd: a, signal: b };
+      }
+    }
+  }
+  return null;
+}
+
+function classifyUsdMacdPair(pair) {
+  if (!pair) return null;
+  const diff = Number(pair.macd) - Number(pair.signal);
+  if (!Number.isFinite(diff)) return null;
+  if (Math.abs(diff) <= 0.0002) return "flat";
+  return diff > 0 ? "up" : "down";
+}
+
+function getUsdMacdNumericStates(result) {
+  const text = buildUsdAllText(result);
+  return {
+    h1: classifyUsdMacdPair(extractUsdMacdPairFromText(text, ["1時間足", "1時間", "60分足", "60分"])),
+    m15: classifyUsdMacdPair(extractUsdMacdPairFromText(text, ["15分足", "15分"])),
+    m5: classifyUsdMacdPair(extractUsdMacdPairFromText(text, ["5分足", "5分"])),
+  };
+}
+
+function applyUsdMacdNumericBias(result) {
+  if (!result) return result;
+  const next = { ...result };
+  const states = getUsdMacdNumericStates(next);
+  const parsed = [states.h1, states.m15, states.m5].filter(Boolean);
+  if (parsed.length < 2) return next;
+
+  const rsi = parseUsdRsiZone(buildUsdAllText(next));
+  const allUp = [states.h1, states.m15, states.m5].every((v) => v === "up" || v === "flat") && parsed.some((v) => v === "up");
+  const allDown = [states.h1, states.m15, states.m5].every((v) => v === "down" || v === "flat") && parsed.some((v) => v === "down");
+
+  if (allUp) {
+    next.longScore = Math.max(Number(next.longScore || 0), 75);
+    next.shortScore = Math.min(Number(next.shortScore || 45), rsi != null && rsi <= 45 ? 45 : 40);
+    next.confidence = Math.min(Math.max(Number(next.confidence || 0), 60), 65);
+    next.decision = "ロング優勢";
+    next.state = "押し目買い待ち / 反発確認待ち";
+    next.entryStatus = "WAIT";
+    next.reasons = [
+      "1時間足MACDは上向き基調を維持し、上位足のロング背景がある",
+      "15分足MACDは上向き基調を維持している",
+      "5分足MACDは上向き基調だが、直近は勢い確認中",
+      rsi != null
+        ? `1分足RSIは${rsi}で${rsi < 45 ? "やや弱く、反発確認を待ちたい位置" : rsi <= 55 ? "中立付近で、押し目確認を待ちたい位置" : "やや高く、現在値からは追い買いせず押し目を待ちたい位置"}`
+        : "1分足RSIの位置を確認し、反発確認前の成行ロングは禁止",
+    ];
+  } else if (allDown) {
+    next.shortScore = Math.max(Number(next.shortScore || 0), 65);
+    next.longScore = Math.min(Number(next.longScore || 50), 50);
+    next.confidence = Math.min(Math.max(Number(next.confidence || 0), 55), 65);
+    next.decision = "ショート寄り";
+    next.state = "戻り売り待ち / 反落確認待ち";
+    next.entryStatus = "WAIT";
+    next.reasons = [
+      states.h1 === "down" ? "1時間足MACDは下向き基調で上位足のロング背景は弱い" : "1時間足は方向確認中",
+      "15分足MACDは下向き継続で、短期上位足はまだ弱い",
+      "5分足MACDは下向きだが、勢いはやや鈍化している",
+      rsi != null ? `1分足RSIは${rsi}で、明確な反発・反落確認を待ちたい` : "1分足RSIも確認し、追い売りは避けたい",
+    ];
+  }
+  return next;
+}
+
 function normalizeUsdJpyShortText(result) {
   if (!result) return result;
 
   // USDJPY短期モードの最終出力直前に通す一括整形。
   // 価格アンカー・ENTRY/TP/STOP価格生成後の文章だけを補正する。
   let next = polishUsdWaitWordingResult({ ...result });
+  next = applyUsdMacdNumericBias(next);
   const textKeys = ["summary", "risk", "entryTrigger", "entryPlan", "cancelCondition", "takeProfitPlan", "stopPlan"];
   const long = Number(next.longScore ?? 0);
   const short = Number(next.shortScore ?? 0);
@@ -3658,13 +3779,24 @@ USDJPY短期モードの具体例:
 
 
 USDJPY短期モードの価格アンカールール:
-- 価格を出す前に、必ずスクショ右側の現在値ラベルを最優先で読む。
+- 価格を出す前に、必ずスクショ上部の「終：」または「終値：」を最優先で読む。
+- 右側の現在値ラベルが読める場合は次に優先する。
+- その次にスクショ上部の「始：」、最後にAI推定のcurrentPriceを使う。
+- EMA値、高値安値、生成済みENTRY/TP/CANCELから現在値を推定しない。
 - 現在値が161.xxxなら、ENTRY / CANCEL / TP / STOP はすべて161.xxx台で統一する。
+- USDJPY短期モードでは、ENTRY候補がcurrentPriceから±0.05円以上、TP/STOP/CANCELが±0.10円以上離れたら不正値として現在値基準で再生成する。
 - 162.xxxなど現在値から大きく離れた価格は出さない。
 - ロングTPはロングENTRYより上、ロングSLはロングENTRYより下に置く。
 - ショートTPはショートENTRYより下、ショートSLはショートENTRYより上に置く。
 - 「戻し」と書くショート候補は必ず現在値より上の価格帯にする。
 - 固定例の価格をコピーせず、必ず現在値基準で再計算する。
+
+USDJPY短期モードのMACD数値判定ルール:
+- MACD数値とシグナル数値が読める場合は、文章推論より数値を優先する。
+- MACD値 > シグナル値なら上向き基調 / ロング加点。
+- MACD値 < シグナル値なら下向き基調 / 下落リスク加点。
+- 差が極小なら横ばい / 勢い弱い。
+- 5分・15分・1時間がすべてMACD > シグナルならロング寄り〜ロング優勢。ただし1分RSIが40台なら成行ロングは禁止し、反発確認待ちにする。
 
 形式:
 {
@@ -3751,6 +3883,7 @@ app.post(
       }
 
       result = normalizeServerResult(result, mode);
+      result.buildVersion = BUILD_VERSION;
       res.json(result);
     } catch (error) {
       console.error(error);
@@ -3762,10 +3895,33 @@ app.post(
   }
 );
 
-app.use(express.static("dist"));
+app.get("/api/version", (req, res) => {
+  res.json({ buildVersion: BUILD_VERSION });
+});
+
+app.use((req, res, next) => {
+  res.setHeader("X-FX-Build-Version", BUILD_VERSION);
+  if (req.method === "GET" && (req.path === "/" || req.path.endsWith("index.html"))) {
+    res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+    res.setHeader("Pragma", "no-cache");
+    res.setHeader("Expires", "0");
+  }
+  next();
+});
+
+app.use(express.static("dist", {
+  etag: false,
+  setHeaders: (res, filePath) => {
+    res.setHeader("X-FX-Build-Version", BUILD_VERSION);
+    if (filePath.endsWith("index.html")) {
+      res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+    }
+  },
+}));
 
 app.use((req, res, next) => {
   if (req.method === "GET") {
+    res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
     return res.sendFile("index.html", { root: "dist" });
   }
   next();

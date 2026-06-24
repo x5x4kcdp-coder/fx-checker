@@ -1,5 +1,7 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import "./App.css";
+
+const BUILD_VERSION = "v31-usdjpy-anchor-macd";
 
 const MODES = {
   USDJPY: {
@@ -413,31 +415,49 @@ function collectUsdPrices(text) {
     .filter((v) => Number.isFinite(v) && v >= 100 && v <= 200);
 }
 
+function medianUsdPrice(values) {
+  const nums = values
+    .map((v) => Number(v))
+    .filter((v) => Number.isFinite(v) && v >= 100 && v <= 200)
+    .sort((a, b) => a - b);
+  if (!nums.length) return null;
+  const mid = Math.floor(nums.length / 2);
+  const median = nums.length % 2 ? nums[mid] : (nums[mid - 1] + nums[mid]) / 2;
+  return Number(median.toFixed(3));
+}
+
 function extractUsdClosePriceFromText(text) {
   const s = String(text || "");
-  const closeMatches = [...s.matchAll(/(?:1分足|5分足|15分足|1時間足|終値)?\s*(?:終|終値)\s*[:：]\s*([0-9]{3}\.[0-9]{3,4})/g)]
-    .map((m) => Number(m[1]))
-    .filter((v) => Number.isFinite(v) && v >= 100 && v <= 200);
-  if (closeMatches.length) {
-    const sorted = [...closeMatches].sort((a, b) => a - b);
-    const mid = Math.floor(sorted.length / 2);
-    const median = sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
-    return Number(median.toFixed(3));
-  }
+  const closeMatches = [...s.matchAll(/(?:1分足|5分足|15分足|1時間足|終値)?\s*(?:終|終値)\s*[:：]\s*([0-9]{3}\.[0-9]{3,4})/g)].map((m) => m[1]);
+  return medianUsdPrice(closeMatches);
+}
 
-  const currentMatch = s.match(/(?:現在値アンカー|現在値|現在価格|終値)\s*(?:は|が|:|：|=|＝|\s)\s*([0-9]{3}\.[0-9]{3,4})/);
-  if (currentMatch) return Number(Number(currentMatch[1]).toFixed(3));
+function extractUsdCurrentLabelPriceFromText(text) {
+  const s = String(text || "");
+  const matches = [...s.matchAll(/(?:現在値アンカー|現在値|現在価格|右側(?:の)?現在値(?:ラベル)?|価格ラベル)\s*(?:は|が|:|：|=|＝|\s)\s*([0-9]{3}\.[0-9]{3,4})/g)].map((m) => m[1]);
+  return medianUsdPrice(matches);
+}
 
-  return null;
+function extractUsdStartPriceFromText(text) {
+  const s = String(text || "");
+  const matches = [...s.matchAll(/(?:1分足|5分足|15分足|1時間足|始値)?\s*(?:始|始値)\s*[:：]\s*([0-9]{3}\.[0-9]{3,4})/g)].map((m) => m[1]);
+  return medianUsdPrice(matches);
 }
 
 function estimateUsdCurrentPrice(result) {
   const text = makeAllText(result || {});
-  const directCurrent = Number(result?.currentPrice);
-  if (Number.isFinite(directCurrent) && directCurrent >= 100 && directCurrent <= 200) return Number(directCurrent.toFixed(3));
 
   const closeAnchor = extractUsdClosePriceFromText(text);
   if (closeAnchor != null) return closeAnchor;
+
+  const currentLabelAnchor = extractUsdCurrentLabelPriceFromText(text);
+  if (currentLabelAnchor != null) return currentLabelAnchor;
+
+  const startAnchor = extractUsdStartPriceFromText(text);
+  if (startAnchor != null) return startAnchor;
+
+  const directCurrent = Number(result?.currentPrice);
+  if (Number.isFinite(directCurrent) && directCurrent >= 100 && directCurrent <= 200) return Number(directCurrent.toFixed(3));
 
   const entryAnchor = estimateUsdCurrentPriceFromEntry(result);
   if (entryAnchor != null) return entryAnchor;
@@ -773,7 +793,7 @@ function getShortCancelPrices(result) {
 function hasInvalidUsdPriceRelations(result) {
   const longRange = extractUsdLongCandidateRange(result);
   const shortRange = extractUsdShortCandidateRange(result);
-  const current = estimateUsdCurrentPriceFromEntry(result) ?? estimateUsdCurrentPrice(result);
+  const current = estimateUsdCurrentPrice(result);
   const displayedPrices = collectUsdPrices([
     result?.entryTrigger,
     result?.entryPlan,
@@ -783,6 +803,8 @@ function hasInvalidUsdPriceRelations(result) {
   ].filter(Boolean).join("\n"));
 
   if (Number.isFinite(current) && displayedPrices.some((price) => Math.abs(price - current) > 0.100)) return true;
+  if (Number.isFinite(current) && longRange && (Math.abs(longRange.low - current) > 0.050 || Math.abs(longRange.high - current) > 0.050)) return true;
+  if (Number.isFinite(current) && shortRange && (Math.abs(shortRange.low - current) > 0.050 || Math.abs(shortRange.high - current) > 0.050)) return true;
 
   if (longRange) {
     if (getLongTpPrices(result).some((price) => price <= longRange.high)) return true;
@@ -802,7 +824,7 @@ function hasInvalidUsdPriceRelations(result) {
 function validateUsdJpyPriceRelations(result) {
   if (!result) return result;
   if (!hasInvalidUsdPriceRelations(result)) return result;
-  const current = estimateUsdCurrentPriceFromEntry(result) ?? estimateUsdCurrentPrice(result);
+  const current = estimateUsdCurrentPrice(result);
   const next = { ...result, __usdCurrentAnchor: current };
   next.entryTrigger = buildUsdConcreteEntryText(next);
   next.cancelCondition = buildUsdConcreteCancelText(next, next.cancelCondition);
@@ -1549,6 +1571,15 @@ function App() {
   const [loading, setLoading] = useState(false);
   const [riskExpanded, setRiskExpanded] = useState(false);
 
+  useEffect(() => {
+    window.__FX_CHECKER_BUILD_VERSION__ = BUILD_VERSION;
+    if ("serviceWorker" in navigator) {
+      navigator.serviceWorker.getRegistrations()
+        .then((registrations) => registrations.forEach((registration) => registration.unregister()))
+        .catch(() => {});
+    }
+  }, []);
+
   const normalizedAiResult = useMemo(() => normalizeFxResult(aiResult, mode), [aiResult, mode]);
 
   const result = useMemo(
@@ -1606,9 +1637,11 @@ function App() {
       formData.append("slot3", files[2]);
       formData.append("slot4", files[3]);
 
-      const res = await fetch(`${apiBase}/api/analyze`, {
+      const res = await fetch(`${apiBase}/api/analyze?build=${encodeURIComponent(BUILD_VERSION)}`, {
         method: "POST",
+        headers: { "X-FX-Build-Version": BUILD_VERSION },
         body: formData,
+        cache: "no-store",
       });
 
       const data = await res.json();
@@ -1766,6 +1799,7 @@ ${(normalizedAiResult.reasons || []).map((r) => `・${r}`).join("\n")}`;
         <div>
           <h1>FX エントリーチェッカー</h1>
           <p>{currentMode.description}</p>
+          <span className="buildVersion">build: {BUILD_VERSION}</span>
         </div>
         <button className="reset" onClick={resetAll}>リセット</button>
       </header>
