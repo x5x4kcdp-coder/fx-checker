@@ -8,7 +8,7 @@ dotenv.config();
 
 const app = express();
 const upload = multer({ storage: multer.memoryStorage() });
-const BUILD_VERSION = "v32-usdjpy-scoring-fallback";
+const BUILD_VERSION = "v33-mxnjpy-anchor-separation";
 
 app.use(cors());
 app.use(express.json({ limit: "20mb" }));
@@ -261,6 +261,7 @@ function firstMxnPriceFromText(text, patterns = []) {
 
 function getMxnTextBlob(result) {
   return [
+    result?.state,
     result?.summary,
     result?.risk,
     result?.entryTrigger,
@@ -273,26 +274,73 @@ function getMxnTextBlob(result) {
   ].filter(Boolean).join("\n");
 }
 
-function estimateMxnCurrentPrice(result) {
-  const directKeys = [
-    result?.currentPrice,
-    result?.current,
-    result?.lastPrice,
-    result?.closePrice,
-    result?.close,
-  ];
-  for (const value of directKeys) {
-    if (isValidMxnPrice(value)) return roundMxn(Number(value), 3);
+function mxnNumberOrNull(value) {
+  if (!isValidMxnPrice(value)) return null;
+  return roundMxn(Number(value), 3);
+}
+
+function collectMxnPriceCandidates(result, specs = []) {
+  const candidates = [];
+  for (const spec of specs) {
+    const value = typeof spec.get === "function" ? spec.get(result) : spec.value;
+    const n = mxnNumberOrNull(value);
+    if (n != null) candidates.push({ value: n, source: spec.source, priority: spec.priority ?? 50 });
   }
-
   const source = getMxnTextBlob(result);
-  const explicit = firstMxnPriceFromText(source, [
-    /(?:現在値|現在価格|終値|終)\s*(?:は|が|:|：)?\s*([9]\.\d{2,4})/,
-    /(?:currentPrice|closePrice|close)\s*(?:=|:|：)\s*([9]\.\d{2,4})/i,
-  ]);
-  if (explicit != null) return explicit;
+  for (const spec of specs) {
+    if (!Array.isArray(spec.patterns)) continue;
+    for (const pattern of spec.patterns) {
+      const m = source.match(pattern);
+      const n = m && mxnNumberOrNull(m[1]);
+      if (n != null) candidates.push({ value: n, source: spec.source, priority: spec.priority ?? 50 });
+    }
+  }
+  return candidates;
+}
 
-  return null;
+function isLikelyBuySummaryAsCurrent(value, buySummary, source, textBlob = "") {
+  if (!isValidMxnPrice(value) || !isValidMxnPrice(buySummary)) return false;
+  const gap = Math.abs(Number(value) - Number(buySummary));
+  const highTrust = /topClose|screenClose|rightLabel|textClose/.test(String(source || ""));
+  if (highTrust) return false;
+
+  // アプリ版で、赤い買サマリを currentPrice として拾う誤認識を防ぐ。
+  // 深押し・買サマリ未回復の文脈で currentPrice が買サマリ近辺なら低信頼として除外する。
+  const saysBelowBuySummary = /(深押し|深い押し目|大きく下回|買サマリ(?:を|下|未回復|回復できず|回復できていない)|まだ回復できていない)/.test(String(textBlob || ""));
+  return gap <= 0.012 && saysBelowBuySummary;
+}
+
+function pickMxnCurrentCandidate(candidates, buySummary, result) {
+  const textBlob = getMxnTextBlob(result);
+  const filtered = [...candidates]
+    .filter((c) => !isLikelyBuySummaryAsCurrent(c.value, buySummary, c.source, textBlob));
+  const sorted = filtered.sort((a, b) => (a.priority - b.priority));
+  if (sorted.length) return sorted[0].value;
+
+  // 候補がすべて「買サマリを現在値として拾った疑い」なら、誤った価格帯を生成しない。
+  if (candidates.length && isValidMxnPrice(buySummary)) return null;
+
+  const fallback = [...candidates].sort((a, b) => (a.priority - b.priority))[0];
+  return fallback?.value ?? null;
+}
+
+function estimateMxnCurrentPrice(result, buySummary = null) {
+  const candidates = collectMxnPriceCandidates(result, [
+    // 1. スクショ上部の「終」/ 終値に相当する高信頼キー
+    { source: "topClose", priority: 1, get: (r) => r?.topClose ?? r?.screenClose ?? r?.chartClose ?? r?.finishPrice ?? r?.endPrice },
+    { source: "textClose", priority: 2, patterns: [/(?:終値|終|終\s*[:：])\s*(?:は|が|:|：)?\s*([9]\.\d{2,4})/] },
+    // 2. 右側の白い現在値ラベル
+    { source: "rightLabel", priority: 3, get: (r) => r?.rightLabelPrice ?? r?.rightCurrentPrice ?? r?.priceLabel },
+    { source: "textCurrent", priority: 4, patterns: [/(?:現在値|現在価格)\s*(?:は|が|:|：)?\s*([9]\.\d{2,4})/] },
+    // 3. スクショ上部の「始」
+    { source: "topOpen", priority: 5, get: (r) => r?.topOpen ?? r?.screenOpen ?? r?.openPrice ?? r?.open },
+    { source: "textOpen", priority: 6, patterns: [/(?:始値|始|始\s*[:：])\s*(?:は|が|:|：)?\s*([9]\.\d{2,4})/] },
+    // 4. AI推定 currentPrice。買サマリと混同しやすいため優先度を下げる。
+    { source: "aiCurrent", priority: 20, get: (r) => r?.currentPrice ?? r?.current ?? r?.lastPrice ?? r?.closePrice ?? r?.close },
+    { source: "textAiCurrent", priority: 21, patterns: [/(?:currentPrice|closePrice|close|lastPrice)\s*(?:=|:|：)\s*([9]\.\d{2,4})/i] },
+  ]);
+
+  return pickMxnCurrentCandidate(candidates, buySummary, result);
 }
 
 function estimateMxnBuySummary(result, currentPrice = null) {
@@ -303,7 +351,8 @@ function estimateMxnBuySummary(result, currentPrice = null) {
     result?.buySupport,
   ];
   for (const value of directKeys) {
-    if (isValidMxnPrice(value)) return roundMxn(Number(value), 3);
+    const n = mxnNumberOrNull(value);
+    if (n != null) return n;
   }
 
   const source = getMxnTextBlob(result);
@@ -313,7 +362,7 @@ function estimateMxnBuySummary(result, currentPrice = null) {
   ]);
   if (explicit != null) return explicit;
 
-  // 買サマリが読めない場合だけ現在値を基準にする。固定価格テンプレには戻さない。
+  // 買サマリは currentPrice とは別物。読めない場合だけ、現在値基準に仮置きする。
   return isValidMxnPrice(currentPrice) ? roundMxn(Number(currentPrice), 3) : null;
 }
 
@@ -370,7 +419,10 @@ function buildMxnDynamicLevels(currentPrice, buySummary) {
 }
 
 function buildMxnLevelsFromResult(result) {
-  const currentPrice = estimateMxnCurrentPrice(result);
+  // buySummary と currentPrice を必ず分離する。
+  // 先に赤い買サマリを拾い、その価格を currentPrice として誤採用しないように current 側でガードする。
+  const buySummaryFirst = estimateMxnBuySummary(result, null);
+  const currentPrice = estimateMxnCurrentPrice(result, buySummaryFirst);
   const buySummary = estimateMxnBuySummary(result, currentPrice);
   return buildMxnDynamicLevels(currentPrice, buySummary);
 }
@@ -519,7 +571,7 @@ function polishMxnNarrativeTone(text, levels = null, scoreState = null) {
 function buildMxnSummaryFromLevels(levels, scoreState) {
   if (!levels) return null;
   if (levels.deepBelowBuySummary || Number(scoreState?.short || 0) > Number(scoreState?.long || 0)) {
-    return `日足の上昇背景は残るものの、現在は深い押し目に入っている。4時間足・1時間足・短期足は下向きで、買サマリ${levels.buySummary}付近を大きく下回っている。現在値は${levels.currentPrice}付近で、短期は下向きで下落リスクが残る。ただし現在は下落リスクが残るため、買い急がず反発確認待ちが妥当。短期RSIは未確認のため断定せず、短期足の下げ止まり・陽線確定・EMA帯回復を待つ場面。`;
+    return `日足の上昇背景は残るものの、現在は深い押し目に入っている。4時間足・1時間足は下向きが残り、買サマリ${levels.buySummary}付近を大きく下回っている。現在値は${levels.currentPrice}付近で、買い急がず反発確認待ちが妥当。短期RSIは未確認のため断定せず、短期足の下げ止まり・陽線確定・EMA帯回復を待つ場面。`;
   }
   if (levels.shallowBelowBuySummary) {
     return `日足の上昇背景は残るものの、現在は押し目確認中。4時間足・1時間足・短期足は調整中で、買サマリ${levels.buySummary}付近をまだ回復できていない。現在値は${levels.currentPrice}付近で、短期の反発確認はまだ不足。短期RSIは未確認のため断定せず、短期足の下げ止まり・陽線確定・EMA帯回復を待つ場面。`;
@@ -2093,7 +2145,10 @@ function buildPrompt(mode, pair) {
 - 危険条件には「短期RSIは未確認のため、反発確認前の成行ロングは禁止」を含める。
 - 5分足画像も無い前提のため、5分MACDを断定しない。必要なら「短期足の動き」と表現する。
 - MXNJPYの価格帯は9.xx台。161.xxx の価格は絶対に出さない。
-- currentPrice は必ずスクショ上部の「終：」を最優先で読む。赤い買サマリは現在値ではない。
+- currentPrice は必ずスクショ上部の「終：」を最優先で読む。次に右側の白い現在値ラベル、次に「始：」を読む。赤い買サマリは現在値ではない。
+- currentPrice と buySummary は別フィールドとして必ず分離する。buySummary を currentPrice にコピーしない。
+- 例：終値が9.1756、買サマリが9.2588なら、currentPrice は9.176、buySummary は9.259。
+- abs(currentPrice - buySummary) が0.05以上ある場合、深押し状態として扱い、ENTRY/STOPはcurrentPrice基準、回復確認候補/TP1はbuySummary基準にする。
 - buySummary は赤い「買サマリ」ラインの価格を読む。買サマリは回復確認ラインとして扱う。
 - ENTRY / CANCEL / TP / STOP の価格は最終的にサーバー側で currentPrice と buySummary から動的計算するため、固定価格テンプレを使わない。
 - RR目安は1回だけ書く。
@@ -3013,8 +3068,8 @@ USDJPY短期モードの価格アンカールール:
 {
   "decision": "LONG" | "SHORT" | "WAIT",
   "entryStatus": "ENTRY_OK" | "WAIT" | "NO_ENTRY",
-  "currentPrice": 9.258,
-  "buySummary": 9.267,
+  "currentPrice": 9.176,
+  "buySummary": 9.259,
   "longScore": 0,
   "shortScore": 0,
   "confidence": 0,

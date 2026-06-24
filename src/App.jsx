@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import "./App.css";
 
-const BUILD_VERSION = "v32-usdjpy-scoring-fallback";
+const BUILD_VERSION = "v33-mxnjpy-anchor-separation";
 
 const MODES = {
   USDJPY: {
