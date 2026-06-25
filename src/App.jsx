@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import "./App.css";
 
-const BUILD_VERSION = "v37-structured-output";
+const BUILD_VERSION = "v38-usdjpy-score-fallback";
 
 const MODES = {
   USDJPY: {

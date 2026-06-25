@@ -8,7 +8,7 @@ dotenv.config();
 
 const app = express();
 const upload = multer({ storage: multer.memoryStorage() });
-const BUILD_VERSION = "v37-structured-output";
+const BUILD_VERSION = "v38-usdjpy-score-fallback";
 
 app.use(cors());
 app.use(express.json({ limit: "20mb" }));
@@ -2079,7 +2079,7 @@ function normalizeUsdJpyShortText(result) {
 }
 
 
-// v37: USDJPY structured output builder.
+// v37/v38: USDJPY structured output builder.
 // The AI is treated as a number extractor; scores, prices and major wording are generated here.
 function usdFiniteNumber(value, min = 100, max = 200) {
   const n = Number(value);
@@ -2280,6 +2280,31 @@ function buildStructuredUsdScore(metrics, original = {}) {
     short = s.h1 === "up" ? 52 : 55;
   }
 
+  // v38: Direction judgment and entry permission are separate.
+  // RSI >= 70 means “no chasing / wait for pullback”, not “no long bias”.
+  // If MACD numbers are missing or only partially available, do not collapse to
+  // 見送り/方向待ち when the chart is already in a high-RSI upward stretch.
+  if (rsi != null && rsi >= 70) {
+    const knownCount = [s.h1, s.m15, s.m5].filter(Boolean).length;
+    const hasSevereBearishStack = downCount >= 2 && upCount === 0;
+
+    if (!hasSevereBearishStack) {
+      if (upCount >= 2) {
+        long = Math.max(long, 75);
+        short = Math.min(short, 40);
+      } else if (upCount >= 1) {
+        long = Math.max(long, 72);
+        short = Math.min(short, 44);
+      } else if (knownCount === 0 || downCount === 0) {
+        long = Math.max(long, 70);
+        short = Math.min(short, 45);
+      } else {
+        long = Math.max(long, 68);
+        short = Math.min(short, 45);
+      }
+    }
+  }
+
   long = Math.max(0, Math.min(100, Math.round(long)));
   short = Math.max(0, Math.min(100, Math.round(short)));
   const diff = Math.abs(long - short);
@@ -2451,7 +2476,7 @@ function buildStructuredUsdResult(result) {
 function normalizeServerResult(result, mode = "USDJPY") {
   if (mode === "MXNJPY") return normalizeMxnSwapResult(result);
 
-  // v37: avoid AI free-generation drift. Use extracted numbers and server templates for USDJPY.
+  // v37/v38: avoid AI free-generation drift. Use extracted numbers and server templates for USDJPY.
   return buildStructuredUsdResult(result);
 
   let next = sanitizeUsdJsonFallbackResult({ ...result });
@@ -3677,7 +3702,7 @@ USDJPY短期モードの価格アンカールール:
   return `
 あなたはFXスキャル用の数値抽出AIです。
 これは投資助言ではなく、チャート画像から条件を整理する補助ツールです。
-重要: v37ではAIは数値抽出が主役です。ENTRY価格、TP、STOP、CANCEL、判定文、自由な危険条件はサーバー側で生成します。JSONには topClose / rightLabelPrice / topOpen / currentPrice / rsi1m / macdValues を可能な限り正確に入れてください。
+重要: v38ではAIは数値抽出が主役です。ENTRY価格、TP、STOP、CANCEL、判定文、自由な危険条件はサーバー側で生成します。JSONには topClose / rightLabelPrice / topOpen / currentPrice / rsi1m / macdValues を可能な限り正確に入れてください。
 
 モード: USDJPY短期モード
 通貨ペア: ${pair}
