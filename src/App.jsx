@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import "./App.css";
 
-const BUILD_VERSION = "v33-mxnjpy-anchor-separation";
+const BUILD_VERSION = "v34-usdjpy-final-text-polish";
 
 const MODES = {
   USDJPY: {
@@ -107,6 +107,8 @@ function makeAllText(result) {
     result?.stopPlan,
     toText(result?.reasons),
     toText(result?.riskAlerts),
+    result?.macdSnapshot ? JSON.stringify(result.macdSnapshot) : "",
+    result?.macdValues ? JSON.stringify(result.macdValues) : "",
   ]
     .filter(Boolean)
     .join(" ");
@@ -424,6 +426,79 @@ function normalizeTextFields(result) {
   }
   if (Array.isArray(next.riskAlerts)) next.riskAlerts = next.riskAlerts.map((v) => normalizeUsdWaitContinuationText(sanitizeMacdWords(sanitizeRawJsonText(v, "")))).filter(Boolean);
 
+  return next;
+}
+
+function extractUsdMacdPairFromText(text, labels) {
+  const source = String(text || "");
+  const labelPattern = labels.join("|");
+  const patterns = [
+    new RegExp(`(?:${labelPattern})[^\n。]*?MACD[^-0-9]*(-?\d+(?:\.\d+)?)[^\n。]*?(?:シグナル|signal)[^-0-9]*(-?\d+(?:\.\d+)?)`, "i"),
+    new RegExp(`(?:${labelPattern})[^\n。]*?(?:シグナル|signal)[^-0-9]*(-?\d+(?:\.\d+)?)[^\n。]*?MACD[^-0-9]*(-?\d+(?:\.\d+)?)`, "i"),
+  ];
+  for (const pattern of patterns) {
+    const m = source.match(pattern);
+    if (m) {
+      const a = Number(m[1]);
+      const b = Number(m[2]);
+      if (Number.isFinite(a) && Number.isFinite(b)) return pattern === patterns[1] ? { macd: b, signal: a } : { macd: a, signal: b };
+    }
+  }
+  return null;
+}
+
+function classifyUsdMacdPair(pair) {
+  if (!pair) return null;
+  const diff = Number(pair.macd) - Number(pair.signal);
+  if (!Number.isFinite(diff)) return null;
+  if (Math.abs(diff) <= 0.0002) return "flat";
+  return diff > 0 ? "up" : "down";
+}
+
+function getUsdMacdNumericStates(result) {
+  const text = makeAllText(result);
+  return {
+    h1: classifyUsdMacdPair(extractUsdMacdPairFromText(text, ["1時間足", "1時間", "60分足", "60分"])),
+    m15: classifyUsdMacdPair(extractUsdMacdPairFromText(text, ["15分足", "15分"])),
+    m5: classifyUsdMacdPair(extractUsdMacdPairFromText(text, ["5分足", "5分"])),
+  };
+}
+
+function applyUsdFinalDisplayTextPolish(result, meta = {}) {
+  if (!result) return result;
+  const next = { ...result };
+  const states = getUsdMacdNumericStates(next);
+  const long = parseSafeScore(meta.longScore ?? next.longScore, 50);
+  const short = parseSafeScore(meta.shortScore ?? next.shortScore, 50);
+  const decision = String(meta.decision ?? next.decision ?? "");
+  const longDominant = decision.includes("ロング優勢") || long - short >= 30;
+  const keys = ["summary", "risk", "entryTrigger", "entryPlan", "cancelCondition", "takeProfitPlan", "stopPlan"];
+
+  const polishM15Down = (value) => {
+    if (!value || states.m15 !== "down") return value;
+    return String(value)
+      .replace(/15分足MACDは上向き継続でロング方向/g, "15分足はロング背景を残すが、MACD値はシグナル値を下回っており、直近の勢いはやや鈍化している")
+      .replace(/15分足MACDは上向き継続でロング加点/g, "15分足はロング背景を残すが、MACD値はシグナル値を下回っており、直近の勢いはやや鈍化している")
+      .replace(/15分足MACDは上向き継続を維持/g, "15分足は上昇背景を残すものの、MACDはやや鈍化している")
+      .replace(/15分足MACDは上向き継続/g, "15分足は上昇背景を残すものの、MACDはやや鈍化している")
+      .replace(/15分足MACDも上向きを継続している/g, "15分足は上昇背景を残すものの、MACDはやや鈍化している")
+      .replace(/15分足・5分足は上向き基調/g, "5分足は上向き基調だが、15分足は直近やや鈍化")
+      .replace(/5分足・15分足は上向き基調/g, "5分足は上向き基調だが、15分足は直近やや鈍化");
+  };
+
+  keys.forEach((key) => {
+    if (next[key]) next[key] = polishM15Down(next[key]);
+  });
+  if (Array.isArray(next.reasons)) next.reasons = next.reasons.map(polishM15Down);
+  if (Array.isArray(next.riskAlerts)) next.riskAlerts = next.riskAlerts.map(polishM15Down);
+
+  if (longDominant && next.cancelCondition) {
+    const longDominantWait = "見送り継続：\n押し目形成や陽線確定が確認できない場合は、ロング優勢でも成行は見送り。";
+    const cancel = String(next.cancelCondition);
+    next.cancelCondition = /見送り継続[:：]/.test(cancel)
+      ? cancel.replace(/見送り継続[:：][\s\S]*$/, longDominantWait)
+      : `${cancel.trim()}\n${longDominantWait}`;
+  }
   return next;
 }
 
@@ -1285,15 +1360,22 @@ function normalizeFxResult(aiResult, mode) {
     next.entryStatus = "WAIT";
   }
 
+  next.decision = decision;
+  next.state = state;
+  next.longScore = Math.round(longScore);
+  next.shortScore = Math.round(shortScore);
+  next.confidence = Math.round(confidence);
+  next = applyUsdFinalDisplayTextPolish(next, { decision, longScore, shortScore });
+
   delete next._usdShortTermDownGuard;
   return {
     ...next,
-    decision,
-    state,
+    decision: next.decision,
+    state: next.state,
     entryStatus: next.entryStatus || "WAIT",
-    longScore: Math.round(longScore),
-    shortScore: Math.round(shortScore),
-    confidence: Math.round(confidence),
+    longScore: Math.round(next.longScore),
+    shortScore: Math.round(next.shortScore),
+    confidence: Math.round(next.confidence),
   };
 }
 
