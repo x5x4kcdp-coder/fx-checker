@@ -8,7 +8,7 @@ dotenv.config();
 
 const app = express();
 const upload = multer({ storage: multer.memoryStorage() });
-const BUILD_VERSION = "v36-usdjpy-rsi-anchor-polish";
+const BUILD_VERSION = "v37-structured-output";
 
 app.use(cors());
 app.use(express.json({ limit: "20mb" }));
@@ -2079,8 +2079,380 @@ function normalizeUsdJpyShortText(result) {
 }
 
 
+// v37: USDJPY structured output builder.
+// The AI is treated as a number extractor; scores, prices and major wording are generated here.
+function usdFiniteNumber(value, min = 100, max = 200) {
+  const n = Number(value);
+  return Number.isFinite(n) && n >= min && n <= max ? n : null;
+}
+
+function genericFiniteNumber(value) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
+function pickFirstFinite(values, min = -Infinity, max = Infinity) {
+  for (const value of values) {
+    const n = Number(value);
+    if (Number.isFinite(n) && n >= min && n <= max) return n;
+  }
+  return null;
+}
+
+function pickUsdStructuredAnchor(result) {
+  const usd = result?.usd || {};
+  const close = medianUsdPrice([
+    result?.topClose, result?.screenClose, result?.chartClose, result?.finishPrice, result?.endPrice,
+    usd?.topClose, usd?.screenClose, usd?.chartClose, usd?.finishPrice, usd?.endPrice,
+  ].filter((v) => v != null));
+  if (close != null) return { value: close, source: "close" };
+
+  const right = medianUsdPrice([
+    result?.rightLabelPrice, result?.rightCurrentPrice, result?.currentLabelPrice, result?.priceLabel,
+    usd?.rightLabelPrice, usd?.rightCurrentPrice, usd?.currentLabelPrice, usd?.priceLabel,
+  ].filter((v) => v != null));
+  if (right != null) return { value: right, source: "right-label" };
+
+  const open = medianUsdPrice([
+    result?.topOpen, result?.screenOpen, result?.openPrice, result?.open,
+    usd?.topOpen, usd?.screenOpen, usd?.openPrice, usd?.open,
+  ].filter((v) => v != null));
+  if (open != null) return { value: open, source: "open" };
+
+  const current = medianUsdPrice([
+    result?.currentPrice, result?.current, result?.lastPrice,
+    usd?.currentPrice, usd?.current, usd?.lastPrice,
+  ].filter((v) => v != null));
+  if (current != null) return { value: current, source: "ai" };
+
+  // Last resort only: old estimator. It may inspect generated text, so mark as fallback.
+  const fallback = estimateUsdCurrentPrice(result);
+  return { value: Number.isFinite(fallback) ? Number(fallback.toFixed(3)) : 161.604, source: "fallback" };
+}
+
+function extractUsdRsi1m(result) {
+  const usd = result?.usd || {};
+  const direct = pickFirstFinite([
+    result?.rsi1m, result?.oneMinuteRsi, result?.rsi, result?.rsiValue,
+    usd?.rsi1m, usd?.oneMinuteRsi, usd?.rsi, usd?.rsiValue,
+  ], 0, 100);
+  if (direct != null) return Number(direct.toFixed(2));
+  const text = buildUsdAllText(result);
+  const parsed = parseUsdRsiZone(text);
+  return parsed != null ? Number(parsed) : null;
+}
+
+function extractUsdStructuredMacdPair(result, tf) {
+  const usd = result?.usd || {};
+  const mv = result?.macdValues || usd?.macdValues || result?.macdSnapshot || usd?.macdSnapshot || {};
+  const map = {
+    m5: { objKeys: ["m5", "fiveMinute", "fiveMin"], macdKeys: ["macd5m", "m5Macd", "fiveMinuteMacd"], signalKeys: ["signal5m", "m5Signal", "fiveMinuteSignal"], labels: ["5分足", "5分"] },
+    m15: { objKeys: ["m15", "fifteenMinute", "fifteenMin"], macdKeys: ["macd15m", "m15Macd", "fifteenMinuteMacd"], signalKeys: ["signal15m", "m15Signal", "fifteenMinuteSignal"], labels: ["15分足", "15分"] },
+    h1: { objKeys: ["h1", "oneHour", "oneHourMacd", "hour1"], macdKeys: ["macd1h", "h1Macd", "oneHourMacd"], signalKeys: ["signal1h", "h1Signal", "oneHourSignal"], labels: ["1時間足", "1時間", "60分足", "60分"] },
+  }[tf];
+  if (!map) return null;
+
+  for (const key of map.objKeys) {
+    const obj = mv?.[key] || result?.[key] || usd?.[key];
+    if (obj && typeof obj === "object") {
+      const macd = genericFiniteNumber(obj.macd ?? obj.MACD ?? obj.value);
+      const signal = genericFiniteNumber(obj.signal ?? obj.Signal ?? obj.sig);
+      if (macd != null && signal != null) return { macd, signal };
+    }
+  }
+
+  const macd = pickFirstFinite([...map.macdKeys.map((k) => result?.[k]), ...map.macdKeys.map((k) => usd?.[k])]);
+  const signal = pickFirstFinite([...map.signalKeys.map((k) => result?.[k]), ...map.signalKeys.map((k) => usd?.[k])]);
+  if (macd != null && signal != null) return { macd, signal };
+
+  return extractUsdMacdPairFromText(buildUsdAllText(result), map.labels);
+}
+
+function classifyUsdStructuredPair(pair) {
+  if (!pair) return null;
+  const diff = Number(pair.macd) - Number(pair.signal);
+  if (!Number.isFinite(diff)) return null;
+  if (Math.abs(diff) <= 0.0002) return "flat";
+  return diff > 0 ? "up" : "down";
+}
+
+function buildStructuredUsdMetrics(result) {
+  const anchor = pickUsdStructuredAnchor(result);
+  const pairs = {
+    h1: extractUsdStructuredMacdPair(result, "h1"),
+    m15: extractUsdStructuredMacdPair(result, "m15"),
+    m5: extractUsdStructuredMacdPair(result, "m5"),
+  };
+  const states = {
+    h1: classifyUsdStructuredPair(pairs.h1),
+    m15: classifyUsdStructuredPair(pairs.m15),
+    m5: classifyUsdStructuredPair(pairs.m5),
+  };
+  return {
+    current: Number(anchor.value.toFixed(3)),
+    anchorSource: anchor.source,
+    rsi: extractUsdRsi1m(result),
+    pairs,
+    states,
+  };
+}
+
+function buildStructuredUsdLevels(current, rsi) {
+  const c = Number(current);
+  const zone = rsi != null ? Number(rsi) : 50;
+  let longLowOffset = 0.020;
+  let longHighOffset = 0.005;
+  let deepLowOffset = 0.045;
+  let deepHighOffset = 0.020;
+
+  if (zone >= 70) {
+    longLowOffset = 0.035; longHighOffset = 0.020; deepLowOffset = 0.060; deepHighOffset = 0.035;
+  } else if (zone >= 60) {
+    longLowOffset = 0.030; longHighOffset = 0.015; deepLowOffset = 0.055; deepHighOffset = 0.030;
+  } else if (zone >= 45) {
+    longLowOffset = 0.020; longHighOffset = 0.005; deepLowOffset = 0.045; deepHighOffset = 0.020;
+  } else if (zone >= 35) {
+    longLowOffset = 0.012; longHighOffset = 0.002; deepLowOffset = 0.037; deepHighOffset = 0.012;
+  } else {
+    longLowOffset = 0.018; longHighOffset = 0.004; deepLowOffset = 0.043; deepHighOffset = 0.018;
+  }
+
+  const longLow = c - longLowOffset;
+  const longHigh = c - longHighOffset;
+  const longDeepLow = c - deepLowOffset;
+  const longDeepHigh = c - deepHighOffset;
+  const shortLow = c + 0.010;
+  const shortHigh = c + 0.025;
+
+  return {
+    current: c,
+    longLow, longHigh, longDeepLow, longDeepHigh, shortLow, shortHigh,
+    longTp1: longHigh + 0.015,
+    longTp2: longHigh + 0.030,
+    longExt: longHigh + 0.055,
+    longSl1: longLow - 0.005,
+    longSl2: longLow - 0.015,
+    shortTp1: shortLow - 0.015,
+    shortTp2: shortLow - 0.035,
+    shortExt: shortLow - 0.055,
+    shortSl1: shortHigh + 0.010,
+    shortSl2: shortHigh + 0.030,
+  };
+}
+
+function macdStateLabelForScore(state) {
+  if (state === "up") return 1;
+  if (state === "down") return -1;
+  return 0;
+}
+
+function buildStructuredUsdScore(metrics, original = {}) {
+  const s = metrics.states;
+  const rsi = metrics.rsi;
+  const upCount = [s.h1, s.m15, s.m5].filter((v) => v === "up").length;
+  const downCount = [s.h1, s.m15, s.m5].filter((v) => v === "down").length;
+  let long = 50;
+  let short = 50;
+
+  long += macdStateLabelForScore(s.h1) * 14;
+  long += macdStateLabelForScore(s.m15) * 12;
+  long += macdStateLabelForScore(s.m5) * 14;
+  short += (s.h1 === "down" ? 10 : 0) + (s.m15 === "down" ? 10 : 0) + (s.m5 === "down" ? 10 : 0);
+  if (s.h1 === "up") short -= 5;
+  if (s.m15 === "up") short -= 5;
+  if (s.m5 === "up") short -= 5;
+
+  if (rsi != null) {
+    if (rsi >= 70) long += 6;
+    else if (rsi >= 60) long += 7;
+    else if (rsi >= 45) long += 2;
+    else if (rsi < 35) short += 6;
+    else if (rsi < 45) short += 3;
+  }
+
+  if (upCount >= 2 && s.h1 === "up") {
+    long = Math.max(long, rsi != null && rsi >= 70 ? 75 : 70);
+    short = Math.min(short, rsi != null && rsi >= 70 ? 40 : 45);
+  }
+
+  if (s.m5 === "down" && s.m15 === "down" && rsi != null && rsi >= 40 && rsi <= 52) {
+    long = s.h1 === "up" ? 60 : 55;
+    short = s.h1 === "up" ? 52 : 55;
+  }
+
+  long = Math.max(0, Math.min(100, Math.round(long)));
+  short = Math.max(0, Math.min(100, Math.round(short)));
+  const diff = Math.abs(long - short);
+  let decision = "見送り";
+  let state = "方向待ち";
+  if (long > short) {
+    if (diff < 15) { decision = "見送り"; state = "方向待ち"; }
+    else if (diff < 20) { decision = "見送り〜ロング寄り"; state = "方向待ち / 反発確認待ち"; }
+    else if (diff < 30) { decision = "ロング寄り"; state = "押し目買い待ち / 反発確認待ち"; }
+    else { decision = "ロング優勢"; state = "押し目買い待ち / 反発確認待ち"; }
+  } else if (short > long) {
+    if (diff < 15) { decision = "見送り"; state = "方向待ち"; }
+    else if (diff < 20) { decision = "見送り〜ショート寄り"; state = "方向待ち / 反落確認待ち"; }
+    else if (diff < 30) { decision = "ショート寄り"; state = "戻り売り待ち / 反落確認待ち"; }
+    else { decision = "ショート優勢"; state = "戻り売り待ち / 反落確認待ち"; }
+  }
+
+  let confidence = diff >= 35 ? 65 : diff >= 20 ? 60 : 50;
+  if ((rsi != null && (rsi >= 70 || rsi <= 30)) || s.h1 !== s.m15) confidence = Math.min(confidence, 70);
+  return { long, short, diff, decision, state, confidence };
+}
+
+function buildStructuredUsdEntryText(levels, rsi) {
+  const rsiCondition = rsi != null && rsi >= 70
+    ? "1分RSIが40〜50まで落ち着いてから反発し、陽線確定した場合に検討。"
+    : "1分RSIが40〜50から反発し、陽線確定した場合に検討。";
+  return `新規成行禁止。\nロング候補：\n${formatPrice(levels.longLow)}〜${formatPrice(levels.longHigh)}付近で下げ止まり、${rsiCondition}\n深押し候補：\n${formatPrice(levels.longDeepLow)}〜${formatPrice(levels.longDeepHigh)}付近まで押しても、5分・15分MACDの方向が大きく崩れず、1分RSI40〜50から反発する場合に検討。\nショート候補：\n${formatPrice(levels.shortLow)}〜${formatPrice(levels.shortHigh)}付近で上値が重くなり、1分RSIが50〜60から反落し、陰線確定した場合のみ短期調整狙いとして検討。`;
+}
+
+function buildStructuredUsdCancelText(levels, score) {
+  const wait = String(score.decision).includes("ロング")
+    ? "押し目形成や陽線確定が確認できない場合は、ロング優勢でも成行は見送り。"
+    : "短期足の方向一致、または1分足の反発・反落確定サインが出ない場合。";
+  return `ロング候補取消：\n${formatPrice(levels.longSl1)}を明確に割り込み、さらに${formatPrice(levels.longSl2)}を下抜ける場合。または5分MACDが下向き転換し、1分RSIが50を下回る場合。\nショート候補取消：\n${formatPrice(levels.shortSl1)}〜${formatPrice(levels.shortSl2)}を明確に上抜け、または5分MACDが上向き継続し、1分RSIが50以上を維持する場合。\n見送り継続：\n${wait}`;
+}
+
+function buildStructuredUsdTakeProfitText(levels) {
+  return `ロング時：\nTP1：${formatPrice(levels.longTp1)}付近\nTP2：${formatPrice(levels.longTp2)}付近\n伸びた場合：${formatPrice(levels.longExt)}付近\n\nショート時：\nTP1：${formatPrice(levels.shortTp1)}付近\nTP2：${formatPrice(levels.shortTp2)}付近\n伸びた場合：${formatPrice(levels.shortExt)}付近\nRR目安：\nTP1は短期利確候補。反発/反落が強く、5分足の方向が維持される場合のみTP2以降を検討。`;
+}
+
+function buildStructuredUsdStopText(levels) {
+  return `ロング時：\n第一SL：${formatPrice(levels.longSl1)}割れ\n深めSL：${formatPrice(levels.longSl2)}割れ\n撤退条件：5分MACDが下向き転換し、1分RSIが50を下回る場合。\n\nショート時：\n第一SL：${formatPrice(levels.shortSl1)}上抜け\n深めSL：${formatPrice(levels.shortSl2)}上抜け\n撤退条件：5分MACDが上向き継続し、1分RSI50以上でEMA帯を維持する場合。`;
+}
+
+function formatMacdPairForDebug(pair) {
+  if (!pair) return null;
+  return `${Number(pair.macd).toFixed(4)} / ${Number(pair.signal).toFixed(4)}`;
+}
+
+function buildStructuredMacdReason(tf, state, pair) {
+  const pairText = pair ? `MACD値${Number(pair.macd).toFixed(4)} / シグナル値${Number(pair.signal).toFixed(4)}` : "MACD数値未確認";
+  if (tf === "h1") {
+    if (state === "up") return `1時間足MACDは${pair ? pairText + "で、" : ""}上位足のロング背景を支えている`;
+    if (state === "down") return `1時間足は反発の形があるが、MACD値はシグナル値を下回っており、上昇継続の確認はまだ必要`;
+    return "1時間足は方向確認中で、上昇継続の確認はまだ必要";
+  }
+  if (tf === "m15") {
+    if (state === "up") return pair && Number(pair.macd) < 0 ? "15分足は弱気圏だが、MACDは上向き転換して改善中" : "15分足MACDはMACD値がシグナル値を上回り、上向き基調";
+    if (state === "down") return "15分足はロング背景を残すが、MACD値はシグナル値を下回っており、直近の勢いはやや鈍化している";
+    return "15分足はロング背景を残すが、短期の勢いはまだ確認不足";
+  }
+  if (tf === "m5") {
+    if (state === "up") return "5分足MACDは上向き転換気味で短期ロング加点";
+    if (state === "down") return "5分足MACDはMACD値がシグナル値を下回り、短期の勢いは確認不足";
+    return "5分足MACDは横ばい気味で、短期の勢いは確認中";
+  }
+  return "MACDは確認中";
+}
+
+function buildStructuredUsdSummary(metrics, score) {
+  const rsi = metrics.rsi;
+  const s = metrics.states;
+  if (rsi != null && rsi >= 70 && String(score.decision).includes("ロング")) {
+    return "1時間足・15分足・5分足にはロング背景がある。ただし1分RSIは70以上で買われ過ぎ圏にあるため、現在値からの追い買いは禁止。ロング方向は優勢だが、押し目形成と短期足の陽線確定を待つ場面。";
+  }
+  if (s.m5 === "down" && s.m15 === "down") {
+    return `1時間足にロング背景は残るが、5分足・15分足MACDは下向きで短期の方向一致は不足。1分RSIも${rsi != null ? `${rsi}付近` : "確認中"}で、現時点ではロング優勢とは言いにくい。成行エントリーは避け、候補価格帯での反発確認を待つ場面。`;
+  }
+  if (String(score.decision).includes("ロング")) {
+    return "1時間足にはロング背景があり、5分足も上向き転換気味。方向はロング寄りだが、現在値からの成行は避け、押し目形成と反発確認を待つ場面。";
+  }
+  return "短期足の方向がまだ揃いきっていないため、成行エントリーは避け、方向一致と反発・反落確認を待つ場面。";
+}
+
+function buildStructuredUsdRiskAlerts(metrics, score) {
+  const alerts = [];
+  const rsi = metrics.rsi;
+  if (rsi != null && rsi >= 70) alerts.push("1分RSIが70以上のため、現在値からの追い買いは禁止。押し目形成を待つ場面。");
+  else if (rsi != null && rsi >= 60) alerts.push("1分RSIが60台でやや高く、現在値からの追い買いは避けたい");
+  else if (rsi != null && rsi <= 35) alerts.push("1分RSIが低く、反発確認前の逆張りロングは慎重に判断");
+
+  if (metrics.states.m5 === "down" || metrics.states.m15 === "down") alerts.push("5分足・15分足のどちらかに勢い確認不足があり、方向一致までは慎重に見る場面");
+  if (String(score.decision).includes("ロング")) alerts.push("押し目形成前の成行エントリーは禁止");
+  return [...new Set(alerts)].slice(0, 4);
+}
+
+function sanitizeStructuredUsdForbiddenText(value) {
+  return String(value || "")
+    .replace(/押し目待ちの成行エントリー推奨/g, "押し目形成前の成行エントリーは禁止")
+    .replace(/成行エントリー推奨/g, "成行エントリーは禁止")
+    .replace(/反落サイン待ち/g, "押し目形成待ち")
+    .replace(/今すぐロング/g, "押し目形成後にロング検討")
+    .replace(/追い買い検討/g, "追い買いは禁止");
+}
+
+function buildStructuredUsdResult(result) {
+  const safe = sanitizeUsdJsonFallbackResult({ ...(result || {}) });
+  const metrics = buildStructuredUsdMetrics(safe);
+  const score = buildStructuredUsdScore(metrics, safe);
+  const levels = buildStructuredUsdLevels(metrics.current, metrics.rsi);
+  const reasons = [
+    buildStructuredMacdReason("h1", metrics.states.h1, metrics.pairs.h1),
+    buildStructuredMacdReason("m15", metrics.states.m15, metrics.pairs.m15),
+    buildStructuredMacdReason("m5", metrics.states.m5, metrics.pairs.m5),
+    metrics.rsi != null
+      ? (metrics.rsi >= 70
+        ? `1分足RSIは${metrics.rsi}で買われ過ぎ圏のため、現在値からは追い買いせず押し目形成を待ちたい位置`
+        : `1分足RSIは${metrics.rsi}で、反発・反落の確定サインを確認したい位置`)
+      : "1分足RSIは数値確認中で、反発・反落の確定サインを待ちたい",
+  ];
+
+  const next = {
+    ...safe,
+    structuredOutput: true,
+    currentPrice: Number(metrics.current.toFixed(3)),
+    topClose: safe.topClose ?? safe?.usd?.topClose,
+    rightLabelPrice: safe.rightLabelPrice ?? safe?.usd?.rightLabelPrice,
+    topOpen: safe.topOpen ?? safe?.usd?.topOpen,
+    rsi1m: metrics.rsi,
+    decision: score.decision,
+    state: score.state,
+    entryStatus: "WAIT",
+    longScore: score.long,
+    shortScore: score.short,
+    confidence: score.confidence,
+    summary: buildStructuredUsdSummary(metrics, score),
+    riskAlerts: buildStructuredUsdRiskAlerts(metrics, score),
+    risk: buildStructuredUsdRiskAlerts(metrics, score).join("\n"),
+    entryTrigger: buildStructuredUsdEntryText(levels, metrics.rsi),
+    entryPlan: buildStructuredUsdEntryText(levels, metrics.rsi),
+    cancelCondition: buildStructuredUsdCancelText(levels, score),
+    takeProfitPlan: buildStructuredUsdTakeProfitText(levels),
+    stopPlan: buildStructuredUsdStopText(levels),
+    reasons,
+    debugAnchors: {
+      ...(safe.debugAnchors || {}),
+      buildVersion: BUILD_VERSION,
+      usd: {
+        currentPriceAnchor: Number(metrics.current).toFixed(3),
+        anchorSource: metrics.anchorSource,
+        rsi1m: metrics.rsi != null ? Number(metrics.rsi).toFixed(2) : null,
+        macd1hSignal1h: formatMacdPairForDebug(metrics.pairs.h1),
+        macd15mSignal15m: formatMacdPairForDebug(metrics.pairs.m15),
+        macd5mSignal5m: formatMacdPairForDebug(metrics.pairs.m5),
+      },
+    },
+  };
+
+  ["summary", "risk", "entryTrigger", "entryPlan", "cancelCondition", "takeProfitPlan", "stopPlan"].forEach((key) => {
+    next[key] = sanitizeStructuredUsdForbiddenText(next[key]);
+  });
+  next.reasons = next.reasons.map(sanitizeStructuredUsdForbiddenText);
+  next.riskAlerts = normalizeUsdRiskAlerts(next.riskAlerts.map(sanitizeStructuredUsdForbiddenText));
+  next.risk = next.riskAlerts.join("\n");
+  return next;
+}
+
+
 function normalizeServerResult(result, mode = "USDJPY") {
   if (mode === "MXNJPY") return normalizeMxnSwapResult(result);
+
+  // v37: avoid AI free-generation drift. Use extracted numbers and server templates for USDJPY.
+  return buildStructuredUsdResult(result);
 
   let next = sanitizeUsdJsonFallbackResult({ ...result });
 
@@ -2310,8 +2682,13 @@ function attachDebugAnchors(result, mode) {
   } else {
     const current = Number(next.currentPrice ?? estimateUsdCurrentPrice(next));
     debug.usd = {
-      currentPriceAnchor: Number.isFinite(current) ? Number(current).toFixed(3) : null,
-      anchorSource: next.__usdAnchorSource || "ai",
+      ...(debug.usd || {}),
+      currentPriceAnchor: debug.usd?.currentPriceAnchor || (Number.isFinite(current) ? Number(current).toFixed(3) : null),
+      anchorSource: debug.usd?.anchorSource || next.__usdAnchorSource || "ai",
+      rsi1m: debug.usd?.rsi1m || (next.rsi1m != null ? Number(next.rsi1m).toFixed(2) : null),
+      macd1hSignal1h: debug.usd?.macd1hSignal1h || null,
+      macd15mSignal15m: debug.usd?.macd15mSignal15m || null,
+      macd5mSignal5m: debug.usd?.macd5mSignal5m || null,
     };
   }
   next.debugAnchors = debug;
@@ -3298,8 +3675,9 @@ USDJPY短期モードの価格アンカールール:
   }
 
   return `
-あなたはFXスキャル用のエントリーチェック補助AIです。
+あなたはFXスキャル用の数値抽出AIです。
 これは投資助言ではなく、チャート画像から条件を整理する補助ツールです。
+重要: v37ではAIは数値抽出が主役です。ENTRY価格、TP、STOP、CANCEL、判定文、自由な危険条件はサーバー側で生成します。JSONには topClose / rightLabelPrice / topOpen / currentPrice / rsi1m / macdValues を可能な限り正確に入れてください。
 
 モード: USDJPY短期モード
 通貨ペア: ${pair}

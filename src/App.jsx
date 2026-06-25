@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import "./App.css";
 
-const BUILD_VERSION = "v36-usdjpy-rsi-anchor-polish";
+const BUILD_VERSION = "v37-structured-output";
 
 const MODES = {
   USDJPY: {
@@ -1006,6 +1006,13 @@ function normalizeFxResult(aiResult, mode) {
   if (!aiResult) return null;
   if (mode === "MXNJPY") return normalizeMxnSwapResult(aiResult);
 
+  if (mode === "USDJPY" && aiResult.structuredOutput) {
+    const next = normalizeTextFields({ ...aiResult });
+    if (Array.isArray(next.riskAlerts)) next.riskAlerts = normalizeUsdRiskAlerts(next.riskAlerts);
+    next.entryStatus = "WAIT";
+    return next;
+  }
+
   let next = normalizeTextFields({ ...aiResult });
   const allText = makeAllText(next);
   const rsi = parseRsi(allText);
@@ -1467,6 +1474,10 @@ function buildAnchorDebugLines(debugAnchors) {
     `build: ${valueOrDash(debug.buildVersion || BUILD_VERSION)}`,
     `usd currentPriceAnchor: ${valueOrDash(usd.currentPriceAnchor)}`,
     `usd anchorSource: ${valueOrDash(usd.anchorSource)}`,
+    `usd rsi1m: ${valueOrDash(usd.rsi1m)}`,
+    `usd macd1h/signal1h: ${valueOrDash(usd.macd1hSignal1h)}`,
+    `usd macd15m/signal15m: ${valueOrDash(usd.macd15mSignal15m)}`,
+    `usd macd5m/signal5m: ${valueOrDash(usd.macd5mSignal5m)}`,
     `mxn currentPriceAnchor: ${valueOrDash(mxn.currentPriceAnchor)}`,
     `mxn anchorSource: ${valueOrDash(mxn.anchorSource)}`,
     `mxn buySummary: ${valueOrDash(mxn.buySummary)}`,
