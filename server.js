@@ -8,7 +8,7 @@ dotenv.config();
 
 const app = express();
 const upload = multer({ storage: multer.memoryStorage() });
-const BUILD_VERSION = "v35-mxn-anchor-guard";
+const BUILD_VERSION = "v36-usdjpy-rsi-anchor-polish";
 
 app.use(cors());
 app.use(express.json({ limit: "20mb" }));
@@ -962,14 +962,18 @@ function estimateUsdCurrentPrice(result) {
 
   // v31: USDJPYの現在値アンカーはスクショ由来の終値/現在値ラベルを最優先にする。
   // AIが生成したENTRY/TP/STOP価格から現在値を逆算しない。
+  const objectCloseAnchor = medianUsdPrice([result?.topClose, result?.close, result?.closePrice, result?.rightLabelPrice, result?.currentLabelPrice].filter((v) => v != null));
   const closeAnchor = extractUsdClosePriceFromText(text);
   if (closeAnchor != null) return closeAnchor;
+  if (objectCloseAnchor != null) return objectCloseAnchor;
 
   const currentLabelAnchor = extractUsdCurrentLabelPriceFromText(text);
   if (currentLabelAnchor != null) return currentLabelAnchor;
 
+  const objectOpenAnchor = medianUsdPrice([result?.topOpen, result?.open, result?.openPrice].filter((v) => v != null));
   const startAnchor = extractUsdStartPriceFromText(text);
   if (startAnchor != null) return startAnchor;
+  if (objectOpenAnchor != null) return objectOpenAnchor;
 
   const directCurrent = Number(result?.currentPrice);
   if (Number.isFinite(directCurrent) && directCurrent >= 100 && directCurrent <= 200) return Number(directCurrent.toFixed(3));
@@ -1632,7 +1636,38 @@ function polishUsdShortModeText(text) {
     .replace(/青で下向き継続気味の状態/g, "下向き継続気味")
     .replace(/青で下向き転換気味/g, "下向き転換気味")
     .replace(/付近付近/g, "付近");
+  value = value
+    .replace(/1分(?:足)?RSIは([0-9]{1,2}(?:\.[0-9]+)?)と買われ過ぎ圏で反落サイン待ちの状態/g, "1分足RSIは$1と買われ過ぎ圏のため、現在値からは追い買いせず押し目形成を待ちたい位置")
+    .replace(/1分(?:足)?RSIは([0-9]{1,2}(?:\.[0-9]+)?)で買われ過ぎ圏で反落サイン待ちの状態/g, "1分足RSIは$1で買われ過ぎ圏のため、現在値からは追い買いせず押し目形成を待ちたい位置")
+    .replace(/買われ過ぎ圏で反落サイン待ちの状態/g, "買われ過ぎ圏のため、現在値からは追い買いせず押し目形成を待ちたい位置")
+    .replace(/反落サイン待ちの状態/g, "現在値からは追い買いせず押し目形成を待ちたい位置")
+    .replace(/1分RSIが70以上で追い買い禁止。/g, "1分RSIが70以上のため、現在値からの追い買いは禁止。押し目形成を待つ場面。")
+    .replace(/1分RSIが70以上のため追い買い禁止。押し目買い待ち。/g, "1分RSIが70以上のため、現在値からの追い買いは禁止。押し目形成を待つ場面。")
+    .replace(/1分足RSIが70以上で追い買い禁止。/g, "1分足RSIが70以上のため、現在値からの追い買いは禁止。押し目形成を待つ場面。")
+    .replace(/1分足RSIが70以上のため追い買い禁止。押し目買い待ち。/g, "1分足RSIが70以上のため、現在値からの追い買いは禁止。押し目形成を待つ場面。");
   return sortDisplayedPriceRanges(value);
+}
+
+function normalizeUsdRiskAlerts(alerts) {
+  if (!Array.isArray(alerts)) return alerts;
+  const out = [];
+  let highRsiAdded = false;
+  const seen = new Set();
+  for (const raw of alerts) {
+    let item = polishUsdShortModeText(sanitizeDirectionWords(String(raw || "").trim()));
+    if (!item) continue;
+    const isHighRsiChase = /1分(?:足)?RSI[^。\n]*(?:70以上|買われ過ぎ|60台後半)/.test(item) && /追い買い|押し目/.test(item);
+    if (isHighRsiChase) {
+      if (highRsiAdded) continue;
+      item = "1分RSIが70以上のため、現在値からの追い買いは禁止。押し目形成を待つ場面。";
+      highRsiAdded = true;
+    }
+    const key = item.replace(/[。．.\s]/g, "");
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(item);
+  }
+  return out;
 }
 
 
@@ -2032,10 +2067,12 @@ function normalizeUsdJpyShortText(result) {
   if (next.cancelCondition) next.cancelCondition = normalizeText(next.cancelCondition);
   if (Array.isArray(next.reasons)) next.reasons = next.reasons.map((v) => normalizeText(v));
   if (Array.isArray(next.riskAlerts)) next.riskAlerts = next.riskAlerts.map((v) => normalizeText(v));
+  if (Array.isArray(next.riskAlerts)) next.riskAlerts = normalizeUsdRiskAlerts(next.riskAlerts);
 
   next = applyUsdFinalDisplayTextPolish(next);
   if (next.cancelCondition) next.cancelCondition = normalizeText(next.cancelCondition);
   if (Array.isArray(next.reasons)) next.reasons = next.reasons.map((v) => normalizeText(v));
+  if (Array.isArray(next.riskAlerts)) next.riskAlerts = normalizeUsdRiskAlerts(next.riskAlerts);
 
   delete next._usdShortTermDownGuard;
   return next;
@@ -3232,6 +3269,10 @@ USDJPY短期モードの価格アンカールール:
 
 形式:
 {
+  "currentPrice": 0,
+  "topClose": 0,
+  "rightLabelPrice": 0,
+  "topOpen": 0,
   "decision": "LONG" | "SHORT" | "WAIT",
   "entryStatus": "ENTRY_OK" | "WAIT" | "NO_ENTRY",
   "currentPrice": 9.176,
@@ -4161,8 +4202,8 @@ USDJPY短期モードの具体例:
 
 
 USDJPY短期モードの価格アンカールール:
-- 価格を出す前に、必ずスクショ上部の「終：」または「終値：」を最優先で読む。
-- 右側の現在値ラベルが読める場合は次に優先する。
+- 価格を出す前に、必ずスクショ上部の「終：」または「終値：」を最優先で読む。読めた値は JSON の currentPrice と topClose に必ず入れる。
+- 右側の現在値ラベルが読める場合は次に優先する。読めた値は rightLabelPrice に入れる。
 - その次にスクショ上部の「始：」、最後にAI推定のcurrentPriceを使う。
 - EMA値、高値安値、生成済みENTRY/TP/CANCELから現在値を推定しない。
 - 現在値が161.xxxなら、ENTRY / CANCEL / TP / STOP はすべて161.xxx台で統一する。
@@ -4182,6 +4223,10 @@ USDJPY短期モードのMACD数値判定ルール:
 
 形式:
 {
+  "currentPrice": 0,
+  "topClose": 0,
+  "rightLabelPrice": 0,
+  "topOpen": 0,
   "decision": "LONG" | "SHORT" | "WAIT",
   "entryStatus": "ENTRY_OK" | "WAIT" | "NO_ENTRY",
   "longScore": 0,

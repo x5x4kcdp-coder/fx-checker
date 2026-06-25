@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import "./App.css";
 
-const BUILD_VERSION = "v35-mxn-anchor-guard";
+const BUILD_VERSION = "v36-usdjpy-rsi-anchor-polish";
 
 const MODES = {
   USDJPY: {
@@ -689,9 +689,39 @@ function polishUsdShortModeText(text) {
   if (!text) return text;
   return String(text)
     .replace(/1分足RSIは40台前半/g, "1分RSIは40台前半")
+    .replace(/1分(?:足)?RSIは([0-9]{1,2}(?:\.[0-9]+)?)と買われ過ぎ圏で反落サイン待ちの状態/g, "1分足RSIは$1と買われ過ぎ圏のため、現在値からは追い買いせず押し目形成を待ちたい位置")
+    .replace(/1分(?:足)?RSIは([0-9]{1,2}(?:\.[0-9]+)?)で買われ過ぎ圏で反落サイン待ちの状態/g, "1分足RSIは$1で買われ過ぎ圏のため、現在値からは追い買いせず押し目形成を待ちたい位置")
+    .replace(/買われ過ぎ圏で反落サイン待ちの状態/g, "買われ過ぎ圏のため、現在値からは追い買いせず押し目形成を待ちたい位置")
+    .replace(/反落サイン待ちの状態/g, "現在値からは追い買いせず押し目形成を待ちたい位置")
+    .replace(/1分RSIが70以上で追い買い禁止。/g, "1分RSIが70以上のため、現在値からの追い買いは禁止。押し目形成を待つ場面。")
+    .replace(/1分RSIが70以上のため追い買い禁止。押し目買い待ち。/g, "1分RSIが70以上のため、現在値からの追い買いは禁止。押し目形成を待つ場面。")
+    .replace(/1分足RSIが70以上で追い買い禁止。/g, "1分足RSIが70以上のため、現在値からの追い買いは禁止。押し目形成を待つ場面。")
+    .replace(/1分足RSIが70以上のため追い買い禁止。押し目買い待ち。/g, "1分足RSIが70以上のため、現在値からの追い買いは禁止。押し目形成を待つ場面。")
     .replace(/RR目安[:：][^\n]*(?:\n)?RR目安[:：]/g, "RR目安:")
     .replace(/。\s*。/g, "。")
     .replace(/付近付近/g, "付近");
+}
+
+function normalizeUsdRiskAlerts(alerts) {
+  if (!Array.isArray(alerts)) return alerts;
+  const out = [];
+  let highRsiAdded = false;
+  const seen = new Set();
+  for (const raw of alerts) {
+    let item = polishUsdShortModeText(sanitizeMacdWords(String(raw || "").trim()));
+    if (!item) continue;
+    const isHighRsiChase = /1分(?:足)?RSI[^。\n]*(?:70以上|買われ過ぎ|60台後半)/.test(item) && /追い買い|押し目/.test(item);
+    if (isHighRsiChase) {
+      if (highRsiAdded) continue;
+      item = "1分RSIが70以上のため、現在値からの追い買いは禁止。押し目形成を待つ場面。";
+      highRsiAdded = true;
+    }
+    const key = item.replace(/[。．.\s]/g, "");
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(item);
+  }
+  return out;
 }
 
 function hasAny(text, words) {
@@ -1370,7 +1400,9 @@ function normalizeFxResult(aiResult, mode) {
   next.longScore = Math.round(longScore);
   next.shortScore = Math.round(shortScore);
   next.confidence = Math.round(confidence);
+  if (Array.isArray(next.riskAlerts)) next.riskAlerts = normalizeUsdRiskAlerts(next.riskAlerts);
   next = applyUsdFinalDisplayTextPolish(next, { decision, longScore, shortScore });
+  if (Array.isArray(next.riskAlerts)) next.riskAlerts = normalizeUsdRiskAlerts(next.riskAlerts);
 
   delete next._usdShortTermDownGuard;
   return {
