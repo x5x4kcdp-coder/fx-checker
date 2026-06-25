@@ -8,7 +8,7 @@ dotenv.config();
 
 const app = express();
 const upload = multer({ storage: multer.memoryStorage() });
-const BUILD_VERSION = "v34-usdjpy-final-text-polish";
+const BUILD_VERSION = "v35-mxn-anchor-guard";
 
 app.use(cors());
 app.use(express.json({ limit: "20mb" }));
@@ -310,22 +310,51 @@ function isLikelyBuySummaryAsCurrent(value, buySummary, source, textBlob = "") {
   return gap <= 0.012 && saysBelowBuySummary;
 }
 
-function pickMxnCurrentCandidate(candidates, buySummary, result) {
-  const textBlob = getMxnTextBlob(result);
-  const filtered = [...candidates]
-    .filter((c) => !isLikelyBuySummaryAsCurrent(c.value, buySummary, c.source, textBlob));
-  const sorted = filtered.sort((a, b) => (a.priority - b.priority));
-  if (sorted.length) return sorted[0].value;
-
-  // 候補がすべて「買サマリを現在値として拾った疑い」なら、誤った価格帯を生成しない。
-  if (candidates.length && isValidMxnPrice(buySummary)) return null;
-
-  const fallback = [...candidates].sort((a, b) => (a.priority - b.priority))[0];
-  return fallback?.value ?? null;
+function normalizeMxnAnchorSource(source) {
+  const s = String(source || "");
+  if (/topClose|screenClose|textClose/.test(s)) return "close";
+  if (/rightLabel|textCurrent/.test(s)) return "right-label";
+  if (/topOpen|textOpen/.test(s)) return "open";
+  if (/aiCurrent|textAiCurrent/.test(s)) return "ai";
+  return "fallback";
 }
 
-function estimateMxnCurrentPrice(result, buySummary = null) {
-  const candidates = collectMxnPriceCandidates(result, [
+function isMxnIndicatorCurrentSource(source) {
+  return /(ema|sma|shortLine|midLine|longLine|macd|signal|rsi|buySummary|sellSummary|買サマリ|売サマリ)/i.test(String(source || ""));
+}
+
+function collectMxnIndicatorPrices(result) {
+  const values = [];
+  const directKeys = [
+    "ema", "ema5", "ema10", "ema20", "sma", "sma5", "sma10", "sma20",
+    "shortEma", "middleEma", "midEma", "longEma", "shortSma", "middleSma", "midSma", "longSma",
+    "shortLine", "middleLine", "midLine", "longLine", "macd", "signal", "rsi",
+    "buySummary", "buySummaryPrice", "buyLine", "sellSummary", "sellSummaryPrice"
+  ];
+  for (const key of directKeys) {
+    const raw = result?.[key];
+    if (Array.isArray(raw)) raw.forEach((v) => { const n = mxnNumberOrNull(v); if (n != null) values.push(n); });
+    else if (raw && typeof raw === "object") Object.values(raw).forEach((v) => { const n = mxnNumberOrNull(v); if (n != null) values.push(n); });
+    else { const n = mxnNumberOrNull(raw); if (n != null) values.push(n); }
+  }
+
+  const source = getMxnTextBlob(result);
+  const indicatorPattern = /(?:EMA|SMA|短期線|中期線|長期線|MACD|シグナル|RSI|買サマリ|売サマリ)[^\n。]*?([9]\.\d{2,4})/gi;
+  let m;
+  while ((m = indicatorPattern.exec(source))) {
+    const n = mxnNumberOrNull(m[1]);
+    if (n != null) values.push(n);
+  }
+  return values;
+}
+
+function isNearAnyMxnPrice(value, prices, tolerance = 0.0045) {
+  if (!isValidMxnPrice(value)) return false;
+  return (prices || []).some((p) => isValidMxnPrice(p) && Math.abs(Number(value) - Number(p)) <= tolerance);
+}
+
+function getMxnCurrentCandidateSpecs() {
+  return [
     // 1. スクショ上部の「終」/ 終値に相当する高信頼キー
     { source: "topClose", priority: 1, get: (r) => r?.topClose ?? r?.screenClose ?? r?.chartClose ?? r?.finishPrice ?? r?.endPrice },
     { source: "textClose", priority: 2, patterns: [/(?:終値|終|終\s*[:：])\s*(?:は|が|:|：)?\s*([9]\.\d{2,4})/] },
@@ -335,12 +364,57 @@ function estimateMxnCurrentPrice(result, buySummary = null) {
     // 3. スクショ上部の「始」
     { source: "topOpen", priority: 5, get: (r) => r?.topOpen ?? r?.screenOpen ?? r?.openPrice ?? r?.open },
     { source: "textOpen", priority: 6, patterns: [/(?:始値|始|始\s*[:：])\s*(?:は|が|:|：)?\s*([9]\.\d{2,4})/] },
-    // 4. AI推定 currentPrice。買サマリと混同しやすいため優先度を下げる。
+    // 4. AI推定 currentPrice。買サマリ・EMA/SMAと混同しやすいため優先度を下げる。
     { source: "aiCurrent", priority: 20, get: (r) => r?.currentPrice ?? r?.current ?? r?.lastPrice ?? r?.closePrice ?? r?.close },
     { source: "textAiCurrent", priority: 21, patterns: [/(?:currentPrice|closePrice|close|lastPrice)\s*(?:=|:|：)\s*([9]\.\d{2,4})/i] },
-  ]);
+  ];
+}
 
-  return pickMxnCurrentCandidate(candidates, buySummary, result);
+function pickMxnCurrentAnchor(candidates, buySummary, result) {
+  const textBlob = getMxnTextBlob(result);
+  const indicatorPrices = collectMxnIndicatorPrices(result);
+  const byPriority = [...candidates]
+    .filter((c) => isValidMxnPrice(c.value))
+    .filter((c) => !isMxnIndicatorCurrentSource(c.source))
+    .sort((a, b) => (a.priority - b.priority));
+
+  // 「終」が取得できている場合は最優先。±0.005以上ズレる他候補で上書きしない。
+  const closeCandidate = byPriority.find((c) => /topClose|textClose/.test(String(c.source || "")));
+  if (closeCandidate) return { value: closeCandidate.value, source: normalizeMxnAnchorSource(closeCandidate.source) };
+
+  const trusted = byPriority.filter((c) => /rightLabel|textCurrent|topOpen|textOpen/.test(String(c.source || "")));
+  if (trusted.length) {
+    const candidate = trusted[0];
+    return { value: candidate.value, source: normalizeMxnAnchorSource(candidate.source) };
+  }
+
+  const filtered = byPriority
+    .filter((c) => !isLikelyBuySummaryAsCurrent(c.value, buySummary, c.source, textBlob))
+    .filter((c) => !isNearAnyMxnPrice(c.value, indicatorPrices, 0.0035));
+
+  if (filtered.length) {
+    const candidate = filtered[0];
+    return { value: candidate.value, source: normalizeMxnAnchorSource(candidate.source) };
+  }
+
+  // 候補がすべて「買サマリ/EMA/SMAを現在値として拾った疑い」なら、誤った価格帯を生成しない。
+  if (candidates.length && isValidMxnPrice(buySummary)) return { value: null, source: "fallback" };
+
+  const fallback = byPriority[0];
+  return { value: fallback?.value ?? null, source: fallback ? normalizeMxnAnchorSource(fallback.source) : "fallback" };
+}
+
+function estimateMxnCurrentAnchor(result, buySummary = null) {
+  const candidates = collectMxnPriceCandidates(result, getMxnCurrentCandidateSpecs());
+  return pickMxnCurrentAnchor(candidates, buySummary, result);
+}
+
+function pickMxnCurrentCandidate(candidates, buySummary, result) {
+  return pickMxnCurrentAnchor(candidates, buySummary, result).value;
+}
+
+function estimateMxnCurrentPrice(result, buySummary = null) {
+  return estimateMxnCurrentAnchor(result, buySummary).value;
 }
 
 function estimateMxnBuySummary(result, currentPrice = null) {
@@ -422,9 +496,15 @@ function buildMxnLevelsFromResult(result) {
   // buySummary と currentPrice を必ず分離する。
   // 先に赤い買サマリを拾い、その価格を currentPrice として誤採用しないように current 側でガードする。
   const buySummaryFirst = estimateMxnBuySummary(result, null);
-  const currentPrice = estimateMxnCurrentPrice(result, buySummaryFirst);
+  const currentAnchor = estimateMxnCurrentAnchor(result, buySummaryFirst);
+  const currentPrice = currentAnchor.value;
   const buySummary = estimateMxnBuySummary(result, currentPrice);
-  return buildMxnDynamicLevels(currentPrice, buySummary);
+  const levels = buildMxnDynamicLevels(currentPrice, buySummary);
+  if (levels) {
+    levels.anchorSource = currentAnchor.source || "fallback";
+    levels.currentPriceAnchor = levels.currentPrice;
+  }
+  return levels;
 }
 
 function buildMxnScoreState(levels) {
@@ -571,7 +651,7 @@ function polishMxnNarrativeTone(text, levels = null, scoreState = null) {
 function buildMxnSummaryFromLevels(levels, scoreState) {
   if (!levels) return null;
   if (levels.deepBelowBuySummary || Number(scoreState?.short || 0) > Number(scoreState?.long || 0)) {
-    return `日足の上昇背景は残るものの、現在は深い押し目に入っている。4時間足・1時間足は下向きが残り、買サマリ${levels.buySummary}付近を大きく下回っている。現在値は${levels.currentPrice}付近で、買い急がず反発確認待ちが妥当。短期RSIは未確認のため断定せず、短期足の下げ止まり・陽線確定・EMA帯回復を待つ場面。`;
+    return `日足の上昇背景は残るものの、現在は深い押し目に入っている。4時間足・1時間足は調整中で、買サマリ${levels.buySummary}付近をまだ回復できていない。現在値は${levels.currentPrice}付近で、買い急がず反発確認待ちが妥当。短期RSIは未確認のため断定せず、短期足の下げ止まり・陽線確定・EMA帯回復を待つ場面。`;
   }
   if (levels.shallowBelowBuySummary) {
     return `日足の上昇背景は残るものの、現在は押し目確認中。4時間足・1時間足・短期足は調整中で、買サマリ${levels.buySummary}付近をまだ回復できていない。現在値は${levels.currentPrice}付近で、短期の反発確認はまだ不足。短期RSIは未確認のため断定せず、短期足の下げ止まり・陽線確定・EMA帯回復を待つ場面。`;
@@ -591,15 +671,15 @@ function buildMxnReasonsFromLevels(levels, scoreState) {
     return [
       "日足の上昇背景は残るものの、現在は深い押し目に入っている",
       "4時間足は買サマリを下回り、反発確認はまだ不足",
-      "1時間足は下向きで、短期は下落リスクが残る",
-      "短期足は下向きだが、下落の勢いはやや鈍化",
+      "1時間足は反発基調に入りつつあるが、買サマリ回復までは確認不足",
+      "短期足では反発の兆しがあるが、買サマリを下回る間は慎重に見送りたい",
       "短期RSIは未確認のため、反発確認前の成行ロングは禁止",
     ];
   }
   return [
     "日足の上昇背景は残る",
     "4時間足・1時間足は調整中で、短期の反発確認はまだ不足",
-    "短期足は下向きだが、下落の勢いはやや鈍化",
+    "短期足では反発の兆しがあるが、買サマリを下回る間は慎重に見送りたい",
     "短期RSIは未確認のため、反発確認前の成行ロングは禁止",
   ];
 }
@@ -649,6 +729,15 @@ function normalizeMxnSwapResult(result) {
   next.currentPrice = levels?.currentPrice ?? (isValidMxnPrice(next.currentPrice) ? formatMxnPrice(Number(next.currentPrice)) : null);
   next.buySummary = levels?.buySummary ?? (isValidMxnPrice(next.buySummary) ? formatMxnPrice(Number(next.buySummary)) : null);
   next.mxnLevels = levels;
+  next.debugAnchors = {
+    ...(next.debugAnchors || {}),
+    buildVersion: BUILD_VERSION,
+    mxn: {
+      currentPriceAnchor: next.currentPrice,
+      anchorSource: levels?.anchorSource || "fallback",
+      buySummary: next.buySummary,
+    },
+  };
 
   next.decision = scoreState.decision;
   next.state = scoreState.state;
@@ -1669,9 +1758,14 @@ function applyUsdFinalDisplayTextPolish(result) {
   const textKeys = ["summary", "risk", "entryTrigger", "entryPlan", "cancelCondition", "takeProfitPlan", "stopPlan"];
 
   const polishM15Down = (value) => {
-    if (!value || states.m15 !== "down") return value;
+    // 数値で15分MACD > シグナルと確認できる場合だけ上向き断定を許可。
+    // 数値未取得またはMACD < シグナルの場合は、追い買いを避ける保守表現へ寄せる。
+    if (!value || states.m15 === "up") return value;
     return String(value)
       .replace(/15分足MACDは上向き継続でロング方向/g, "15分足はロング背景を残すが、MACD値はシグナル値を下回っており、直近の勢いはやや鈍化している")
+      .replace(/15分足MACDは上向き基調継続/g, "15分足は上昇背景を残すものの、MACDはやや鈍化している")
+      .replace(/15分足MACDはロング方向を支持/g, "15分足はロング背景を残すが、短期の勢いはまだ確認不足")
+      .replace(/15分足MACDは上向きでロング加点/g, "15分足はロング背景を残すが、短期の勢いはまだ確認不足")
       .replace(/15分足MACDは上向き継続でロング加点/g, "15分足はロング背景を残すが、MACD値はシグナル値を下回っており、直近の勢いはやや鈍化している")
       .replace(/15分足MACDは上向き継続を維持/g, "15分足は上昇背景を残すものの、MACDはやや鈍化している")
       .replace(/15分足MACDは上向き継続/g, "15分足は上昇背景を残すものの、MACDはやや鈍化している")
@@ -2164,6 +2258,29 @@ function normalizeServerResult(result, mode = "USDJPY") {
   return normalizeUsdJpyShortText(next);
 }
 
+
+function attachDebugAnchors(result, mode) {
+  if (!result) return result;
+  const next = { ...result };
+  const debug = { ...(next.debugAnchors || {}), buildVersion: BUILD_VERSION };
+  if (mode === "MXNJPY") {
+    const levels = next.mxnLevels || buildMxnLevelsFromResult(next);
+    debug.mxn = {
+      currentPriceAnchor: levels?.currentPrice || next.currentPrice || null,
+      anchorSource: levels?.anchorSource || next.debugAnchors?.mxn?.anchorSource || "fallback",
+      buySummary: levels?.buySummary || next.buySummary || null,
+    };
+  } else {
+    const current = Number(next.currentPrice ?? estimateUsdCurrentPrice(next));
+    debug.usd = {
+      currentPriceAnchor: Number.isFinite(current) ? Number(current).toFixed(3) : null,
+      anchorSource: next.__usdAnchorSource || "ai",
+    };
+  }
+  next.debugAnchors = debug;
+  return next;
+}
+
 function buildPrompt(mode, pair) {
   const isMxn = mode === "MXNJPY";
 
@@ -2190,6 +2307,9 @@ function buildPrompt(mode, pair) {
 - 5分足画像も無い前提のため、5分MACDを断定しない。必要なら「短期足の動き」と表現する。
 - MXNJPYの価格帯は9.xx台。161.xxx の価格は絶対に出さない。
 - currentPrice は必ずスクショ上部の「終：」を最優先で読む。次に右側の白い現在値ラベル、次に「始：」を読む。赤い買サマリは現在値ではない。
+- JSONには topClose / rightLabelPrice / topOpen / buySummary を可能な限り数値で入れる。
+- currentPrice候補から EMA / SMA / 短期線 / 中期線 / 長期線 / MACD / シグナル / RSI / 買サマリ / 売サマリ の数値を除外する。
+- 例：終が9.2256、買サマリが9.2588、EMA長期が9.2164なら、currentPriceは9.2256であり9.2164ではない。
 - currentPrice と buySummary は別フィールドとして必ず分離する。buySummary を currentPrice にコピーしない。
 - 例：終値が9.1756、買サマリが9.2588なら、currentPrice は9.176、buySummary は9.259。
 - abs(currentPrice - buySummary) が0.05以上ある場合、深押し状態として扱い、ENTRY/STOPはcurrentPrice基準、回復確認候補/TP1はbuySummary基準にする。
@@ -3099,6 +3219,8 @@ USDJPY短期モードの具体例:
 USDJPY短期モードの価格アンカールール:
 - 価格を出す前に、必ずチャート上部の「終：」または「終値：」を最優先で読む。EMA値や高値安値、生成済みENTRY/TP/CANCELから現在値を推定しない。
 - 1分足 / 5分足 / 15分足 / 1時間足に「終：」が複数ある場合は、終値の中央値または最新値を currentPrice としてJSONに必ず入れる。
+- 15分足のMACD値とシグナル値を読める場合は macdValues.m15.macd / macdValues.m15.signal に必ず入れる。
+- 15分足MACD値 < シグナル値なら「上向き継続」「ロング方向」と断定しない。
 - 今回のように 161.6042 / 161.6042 / 161.6042 / 161.6052 が見える場合、currentPrice は 161.604 にする。
 - 現在値が161.604付近なら、ENTRY / CANCEL / TP / STOP はすべて161.604基準で統一し、162.000以上の価格は基本禁止。
 - USDJPY短期モードでは、出力価格がcurrentPriceから±0.150以上離れたら不正値として現在値基準で再生成する。
@@ -3113,7 +3235,11 @@ USDJPY短期モードの価格アンカールール:
   "decision": "LONG" | "SHORT" | "WAIT",
   "entryStatus": "ENTRY_OK" | "WAIT" | "NO_ENTRY",
   "currentPrice": 9.176,
+  "topClose": 9.176,
+  "rightLabelPrice": 9.176,
+  "topOpen": 9.176,
   "buySummary": 9.259,
+  "macdValues": { "m5": { "macd": 0, "signal": 0 }, "m15": { "macd": 0, "signal": 0 }, "h1": { "macd": 0, "signal": 0 } },
   "longScore": 0,
   "shortScore": 0,
   "confidence": 0,
@@ -4142,6 +4268,7 @@ app.post(
       }
 
       result = normalizeServerResult(result, mode);
+      result = attachDebugAnchors(result, mode);
       result.buildVersion = BUILD_VERSION;
       res.json(result);
     } catch (error) {

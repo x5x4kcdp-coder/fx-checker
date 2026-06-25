@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import "./App.css";
 
-const BUILD_VERSION = "v34-usdjpy-final-text-polish";
+const BUILD_VERSION = "v35-mxn-anchor-guard";
 
 const MODES = {
   USDJPY: {
@@ -475,9 +475,14 @@ function applyUsdFinalDisplayTextPolish(result, meta = {}) {
   const keys = ["summary", "risk", "entryTrigger", "entryPlan", "cancelCondition", "takeProfitPlan", "stopPlan"];
 
   const polishM15Down = (value) => {
-    if (!value || states.m15 !== "down") return value;
+    // 数値で15分MACD > シグナルと確認できる場合だけ上向き断定を許可。
+    // 数値未取得またはMACD < シグナルの場合は、追い買いを避ける保守表現へ寄せる。
+    if (!value || states.m15 === "up") return value;
     return String(value)
       .replace(/15分足MACDは上向き継続でロング方向/g, "15分足はロング背景を残すが、MACD値はシグナル値を下回っており、直近の勢いはやや鈍化している")
+      .replace(/15分足MACDは上向き基調継続/g, "15分足は上昇背景を残すものの、MACDはやや鈍化している")
+      .replace(/15分足MACDはロング方向を支持/g, "15分足はロング背景を残すが、短期の勢いはまだ確認不足")
+      .replace(/15分足MACDは上向きでロング加点/g, "15分足はロング背景を残すが、短期の勢いはまだ確認不足")
       .replace(/15分足MACDは上向き継続でロング加点/g, "15分足はロング背景を残すが、MACD値はシグナル値を下回っており、直近の勢いはやや鈍化している")
       .replace(/15分足MACDは上向き継続を維持/g, "15分足は上昇背景を残すものの、MACDはやや鈍化している")
       .replace(/15分足MACDは上向き継続/g, "15分足は上昇背景を残すものの、MACDはやや鈍化している")
@@ -1420,6 +1425,22 @@ function extractUsdEntryHighlightRanges(entryText) {
   return { longFirst, longSecond, shortFirst };
 }
 
+
+function buildAnchorDebugLines(debugAnchors) {
+  const debug = debugAnchors || {};
+  const usd = debug.usd || {};
+  const mxn = debug.mxn || {};
+  const valueOrDash = (value) => value == null || value === "" ? "-" : value;
+  return [
+    `build: ${valueOrDash(debug.buildVersion || BUILD_VERSION)}`,
+    `usd currentPriceAnchor: ${valueOrDash(usd.currentPriceAnchor)}`,
+    `usd anchorSource: ${valueOrDash(usd.anchorSource)}`,
+    `mxn currentPriceAnchor: ${valueOrDash(mxn.currentPriceAnchor)}`,
+    `mxn anchorSource: ${valueOrDash(mxn.anchorSource)}`,
+    `mxn buySummary: ${valueOrDash(mxn.buySummary)}`,
+  ];
+}
+
 function buildUsdHighlightCards({ entryText, direction, result }) {
   const { longFirst, longSecond, shortFirst } = extractUsdEntryHighlightRanges(entryText);
   const cards = [];
@@ -1917,6 +1938,8 @@ ${normalized.stopPlan || ""}`
     [normalizedAiResult, entryCard, result, mode]
   );
 
+  const debugAnchorLines = useMemo(() => buildAnchorDebugLines(normalizedAiResult?.debugAnchors), [normalizedAiResult]);
+
   const chatCopyText = useMemo(() => {
     if (!normalizedAiResult) return "";
 
@@ -2036,6 +2059,14 @@ ${(normalizedAiResult.reasons || []).map((r) => `・${r}`).join("\n")}`;
           <div className="diff scoreCard"><span>差</span><b>{result.diff}点</b></div>
         </div>
       </section>
+
+      {normalizedAiResult && (
+        <section className="anchorDebug">
+          {debugAnchorLines.map((line) => (
+            <span key={line}>{line}</span>
+          ))}
+        </section>
+      )}
 
       <button className={`aiButton ${normalizedAiResult ? "after-result" : ""}`} onClick={analyzeWithAi} disabled={loading}>
         {loading ? "AI判定中..." : "スクショからAI自動チェック"}
