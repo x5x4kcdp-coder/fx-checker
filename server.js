@@ -8,7 +8,7 @@ dotenv.config();
 
 const app = express();
 const upload = multer({ storage: multer.memoryStorage() });
-const BUILD_VERSION = "v38-usdjpy-score-fallback";
+const BUILD_VERSION = "v39-entry-permission";
 
 app.use(cors());
 app.use(express.json({ limit: "20mb" }));
@@ -683,6 +683,51 @@ function buildMxnReasonsFromLevels(levels, scoreState) {
     "短期RSIは未確認のため、反発確認前の成行ロングは禁止",
   ];
 }
+
+function buildMxnEntryPermission(levels, scoreState) {
+  if (!levels) {
+    return {
+      entryPermission: "完全見送り",
+      entryPermissionReason: "現在値と買サマリが確認できず、価格帯の信頼度が不足。",
+      entryNextCondition: "現在値・買サマリ・短期足の下げ止まりを再確認。",
+    };
+  }
+  if (levels.deepBelowBuySummary) {
+    return {
+      entryPermission: "反発確認待ち",
+      entryPermissionReason: "現在値は買サマリを下回っているが、短期足では反発の兆しがある。買い急がず確認待ち。",
+      entryNextCondition: `${levels.buySummary}付近の買サマリ回復、または${levels.longZone}付近での下げ止まり・陽線確定・EMA帯回復を確認。`,
+    };
+  }
+  if (levels.shallowBelowBuySummary) {
+    return {
+      entryPermission: "条件付き可",
+      entryPermissionReason: "買サマリ直下で押し目確認中。短期足の陽線確定またはEMA帯回復があればロング検討可能。",
+      entryNextCondition: `${levels.recoveryZone}付近の回復維持、または${levels.longZone}付近の下げ止まりを確認。`,
+    };
+  }
+  if (Number(levels.gap) <= 0) {
+    return {
+      entryPermission: "可",
+      entryPermissionReason: "買サマリ回復後に維持できており、反発確認後のロングを検討できる位置。",
+      entryNextCondition: "買サマリ割れを撤退条件にして、短期足の陽線維持を確認。",
+    };
+  }
+  return {
+    entryPermission: "条件付き可",
+    entryPermissionReason: "買サマリ回復に近いが、維持確認まではまだ慎重に見たい位置。",
+    entryNextCondition: `${levels.recoveryZone}付近を回復し、買サマリ上で維持できるか確認。`,
+  };
+}
+
+function applyMxnEntryPrefix(entryText, permission) {
+  const label = String(permission?.entryPermission || "");
+  if (!entryText) return entryText;
+  if (label === "可") return String(entryText).replace(/^新規成行禁止。/, "ロング検討可。");
+  if (label === "条件付き可") return String(entryText).replace(/^新規成行禁止。/, "新規成行は慎重。条件成立後に検討。");
+  return entryText;
+}
+
 function polishMxnTimeframeText(text) {
   if (!text) return text;
   return String(text)
@@ -725,6 +770,7 @@ function normalizeMxnSwapResult(result) {
 
   const levels = buildMxnLevelsFromResult(next);
   const scoreState = buildMxnScoreState(levels);
+  const entryPermission = buildMxnEntryPermission(levels, scoreState);
 
   next.currentPrice = levels?.currentPrice ?? (isValidMxnPrice(next.currentPrice) ? formatMxnPrice(Number(next.currentPrice)) : null);
   next.buySummary = levels?.buySummary ?? (isValidMxnPrice(next.buySummary) ? formatMxnPrice(Number(next.buySummary)) : null);
@@ -732,6 +778,9 @@ function normalizeMxnSwapResult(result) {
   next.debugAnchors = {
     ...(next.debugAnchors || {}),
     buildVersion: BUILD_VERSION,
+    entryPermission: entryPermission.entryPermission,
+    entryPermissionReason: entryPermission.entryPermissionReason,
+    entryNextCondition: entryPermission.entryNextCondition,
     mxn: {
       currentPriceAnchor: next.currentPrice,
       anchorSource: levels?.anchorSource || "fallback",
@@ -742,6 +791,9 @@ function normalizeMxnSwapResult(result) {
   next.decision = scoreState.decision;
   next.state = scoreState.state;
   next.entryStatus = "WAIT";
+  next.entryPermission = entryPermission.entryPermission;
+  next.entryPermissionReason = entryPermission.entryPermissionReason;
+  next.entryNextCondition = entryPermission.entryNextCondition;
   next.longScore = scoreState.long;
   next.shortScore = scoreState.short;
   next.confidence = scoreState.confidence;
@@ -760,7 +812,7 @@ function normalizeMxnSwapResult(result) {
     ).trim();
   }
 
-  next.entryTrigger = buildMxnEntryTextFromLevels(levels);
+  next.entryTrigger = applyMxnEntryPrefix(buildMxnEntryTextFromLevels(levels), entryPermission);
   next.cancelCondition = buildMxnCancelTextFromLevels(levels);
   next.takeProfitPlan = buildMxnTakeProfitTextFromLevels(levels);
   next.stopPlan = buildMxnStopTextFromLevels(levels);
@@ -1816,7 +1868,7 @@ function applyUsdFinalDisplayTextPolish(result) {
   if (Array.isArray(next.riskAlerts)) next.riskAlerts = next.riskAlerts.map(polishM15Down);
 
   if (longDominant && next.cancelCondition) {
-    const longDominantWait = "見送り継続：\n押し目形成や陽線確定が確認できない場合は、ロング優勢でも成行は見送り。";
+    const longDominantWait = "見送り継続：\n押し目形成や陽線確定が確認できない場合は、ロング方向でも成行は見送り。";
     const cancel = String(next.cancelCondition);
     if (/見送り継続[:：]/.test(cancel)) {
       next.cancelCondition = cancel.replace(/見送り継続[:：][\s\S]*$/, longDominantWait);
@@ -2327,16 +2379,125 @@ function buildStructuredUsdScore(metrics, original = {}) {
   return { long, short, diff, decision, state, confidence };
 }
 
-function buildStructuredUsdEntryText(levels, rsi) {
+
+function buildStructuredUsdEntryPermission(metrics, score, levels) {
+  const decision = String(score?.decision || "");
+  const state = String(score?.state || "");
+  const rsi = metrics?.rsi;
+  const longish = decision.includes("ロング") || Number(score?.long || 0) > Number(score?.short || 0) + 10;
+  const shortish = decision.includes("ショート") || Number(score?.short || 0) > Number(score?.long || 0) + 10;
+  const diff = Number(score?.diff || Math.abs(Number(score?.long || 0) - Number(score?.short || 0)));
+  const longZone = `${formatPrice(levels.longLow)}〜${formatPrice(levels.longHigh)}`;
+  const shortZone = `${formatPrice(levels.shortLow)}〜${formatPrice(levels.shortHigh)}`;
+
+  if (!longish && !shortish) {
+    return {
+      entryPermission: "完全見送り",
+      entryPermissionReason: "上位足と短期足の方向が揃っておらず、反発・反落条件も未確認。",
+      entryNextCondition: "5分・15分MACDの方向一致、または1分足で明確な反発・反落サインを待つ。",
+    };
+  }
+
+  if (longish && !shortish) {
+    if (rsi != null && rsi >= 70) {
+      return {
+        entryPermission: "RSI反発待ち",
+        entryPermissionReason: "ロング背景はあるが、1分RSIが70以上のため現在値からの追い買いは禁止。",
+        entryNextCondition: `${longZone}付近まで押し、RSI40〜50へ低下後、反発・陽線確定でロング検討。`,
+      };
+    }
+    if (rsi != null && rsi >= 55) {
+      return {
+        entryPermission: "RSI反発待ち",
+        entryPermissionReason: "ロング方向だが、1分RSIがまだやや高く浅い押し目待ち。",
+        entryNextCondition: `${longZone}付近で下げ止まり、RSI40〜50への低下と陽線確定を確認。`,
+      };
+    }
+    if (rsi != null && rsi >= 30 && rsi <= 54) {
+      if (decision.includes("ロング優勢") && diff >= 30 && rsi >= 35 && rsi <= 50) {
+        return {
+          entryPermission: "可",
+          entryPermissionReason: "押し目候補ゾーンで下げ止まり、RSI反発と陽線確定を確認できればロング検討可。",
+          entryNextCondition: "直近安値割れを撤退条件にして、ロング検討可。",
+        };
+      }
+      return {
+        entryPermission: "条件付き可",
+        entryPermissionReason: "押し目候補ゾーンに近く、RSIも冷えている。反発確認が入ればロング検討可能。",
+        entryNextCondition: "1分足の陽線確定、直近安値切り上げ、またはEMA帯回復を確認。",
+      };
+    }
+    if (rsi != null && rsi < 30) {
+      return {
+        entryPermission: decision.includes("ロング") ? "条件付き可" : "完全見送り",
+        entryPermissionReason: "1分RSIは30未満で売られすぎだが、反発確認前の逆張りロングは危険。",
+        entryNextCondition: "陽線確定、安値切り上げ、EMA帯回復を確認してからロング検討。",
+      };
+    }
+    return {
+      entryPermission: decision.includes("見送り") || state.includes("方向待ち") ? "完全見送り" : "条件付き可",
+      entryPermissionReason: decision.includes("見送り") ? "方向優位性がまだ限定的で、反発条件も未確認。" : "ロング方向だが、最後の反発確認が必要。",
+      entryNextCondition: `${longZone}付近で下げ止まり、1分足の陽線確定またはEMA帯回復を確認。`,
+    };
+  }
+
+  if (shortish) {
+    if (rsi != null && rsi <= 30) {
+      return {
+        entryPermission: "RSI反落待ち",
+        entryPermissionReason: "ショート背景はあるが、1分RSIが低すぎるため現在値からの追い売りは禁止。",
+        entryNextCondition: `${shortZone}付近まで戻し、RSI50〜60から反落、陰線確定でショート検討。`,
+      };
+    }
+    if (rsi != null && rsi >= 45 && rsi <= 65) {
+      if (decision.includes("ショート優勢") && diff >= 30 && rsi >= 50 && rsi <= 60) {
+        return {
+          entryPermission: "可",
+          entryPermissionReason: "戻り売り候補ゾーンで上値が重く、RSI反落と陰線確定を確認できればショート検討可。",
+          entryNextCondition: "直近高値上抜けを撤退条件にして、ショート検討可。",
+        };
+      }
+      return {
+        entryPermission: "条件付き可",
+        entryPermissionReason: "戻り売り候補に近く、RSIも反落確認しやすい位置。陰線確定が入ればショート検討可能。",
+        entryNextCondition: "1分足の陰線確定、直近高値切り下げ、またはEMA帯失敗を確認。",
+      };
+    }
+    return {
+      entryPermission: decision.includes("見送り") || state.includes("方向待ち") ? "完全見送り" : "RSI反落待ち",
+      entryPermissionReason: "ショート方向だが、現在値からの追い売りは避けたい。",
+      entryNextCondition: `${shortZone}付近まで戻し、RSI50〜60から反落、陰線確定でショート検討。`,
+    };
+  }
+
+  return {
+    entryPermission: "完全見送り",
+    entryPermissionReason: "方向優位性がまだ限定的で、反発・反落条件も未確認。",
+    entryNextCondition: "方向一致と1分足の確定サインを待つ。",
+  };
+}
+
+function buildStructuredUsdEntryPrefix(permission) {
+  const label = String(permission?.entryPermission || "");
+  if (label === "可") {
+    const reason = String(permission?.entryPermissionReason || "");
+    return reason.includes("ショート") ? "ショート検討可。" : "ロング検討可。";
+  }
+  if (label === "条件付き可") return "新規成行は慎重。条件成立後に検討。";
+  return "新規成行禁止。";
+}
+
+function buildStructuredUsdEntryText(levels, rsi, permission = null) {
+  const prefix = buildStructuredUsdEntryPrefix(permission);
   const rsiCondition = rsi != null && rsi >= 70
     ? "1分RSIが40〜50まで落ち着いてから反発し、陽線確定した場合に検討。"
     : "1分RSIが40〜50から反発し、陽線確定した場合に検討。";
-  return `新規成行禁止。\nロング候補：\n${formatPrice(levels.longLow)}〜${formatPrice(levels.longHigh)}付近で下げ止まり、${rsiCondition}\n深押し候補：\n${formatPrice(levels.longDeepLow)}〜${formatPrice(levels.longDeepHigh)}付近まで押しても、5分・15分MACDの方向が大きく崩れず、1分RSI40〜50から反発する場合に検討。\nショート候補：\n${formatPrice(levels.shortLow)}〜${formatPrice(levels.shortHigh)}付近で上値が重くなり、1分RSIが50〜60から反落し、陰線確定した場合のみ短期調整狙いとして検討。`;
+  return `${prefix}\nロング候補：\n${formatPrice(levels.longLow)}〜${formatPrice(levels.longHigh)}付近で下げ止まり、${rsiCondition}\n深押し候補：\n${formatPrice(levels.longDeepLow)}〜${formatPrice(levels.longDeepHigh)}付近まで押しても、5分・15分MACDの方向が大きく崩れず、1分RSI40〜50から反発する場合に検討。\nショート候補：\n${formatPrice(levels.shortLow)}〜${formatPrice(levels.shortHigh)}付近で上値が重くなり、1分RSIが50〜60から反落し、陰線確定した場合のみ短期調整狙いとして検討。`;
 }
 
 function buildStructuredUsdCancelText(levels, score) {
   const wait = String(score.decision).includes("ロング")
-    ? "押し目形成や陽線確定が確認できない場合は、ロング優勢でも成行は見送り。"
+    ? "押し目形成や陽線確定が確認できない場合は、ロング方向でも成行は見送り。"
     : "短期足の方向一致、または1分足の反発・反落確定サインが出ない場合。";
   return `ロング候補取消：\n${formatPrice(levels.longSl1)}を明確に割り込み、さらに${formatPrice(levels.longSl2)}を下抜ける場合。または5分MACDが下向き転換し、1分RSIが50を下回る場合。\nショート候補取消：\n${formatPrice(levels.shortSl1)}〜${formatPrice(levels.shortSl2)}を明確に上抜け、または5分MACDが上向き継続し、1分RSIが50以上を維持する場合。\n見送り継続：\n${wait}`;
 }
@@ -2415,6 +2576,7 @@ function buildStructuredUsdResult(result) {
   const metrics = buildStructuredUsdMetrics(safe);
   const score = buildStructuredUsdScore(metrics, safe);
   const levels = buildStructuredUsdLevels(metrics.current, metrics.rsi);
+  const entryPermission = buildStructuredUsdEntryPermission(metrics, score, levels);
   const reasons = [
     buildStructuredMacdReason("h1", metrics.states.h1, metrics.pairs.h1),
     buildStructuredMacdReason("m15", metrics.states.m15, metrics.pairs.m15),
@@ -2437,14 +2599,17 @@ function buildStructuredUsdResult(result) {
     decision: score.decision,
     state: score.state,
     entryStatus: "WAIT",
+    entryPermission: entryPermission.entryPermission,
+    entryPermissionReason: entryPermission.entryPermissionReason,
+    entryNextCondition: entryPermission.entryNextCondition,
     longScore: score.long,
     shortScore: score.short,
     confidence: score.confidence,
     summary: buildStructuredUsdSummary(metrics, score),
     riskAlerts: buildStructuredUsdRiskAlerts(metrics, score),
     risk: buildStructuredUsdRiskAlerts(metrics, score).join("\n"),
-    entryTrigger: buildStructuredUsdEntryText(levels, metrics.rsi),
-    entryPlan: buildStructuredUsdEntryText(levels, metrics.rsi),
+    entryTrigger: buildStructuredUsdEntryText(levels, metrics.rsi, entryPermission),
+    entryPlan: buildStructuredUsdEntryText(levels, metrics.rsi, entryPermission),
     cancelCondition: buildStructuredUsdCancelText(levels, score),
     takeProfitPlan: buildStructuredUsdTakeProfitText(levels),
     stopPlan: buildStructuredUsdStopText(levels),
@@ -2452,6 +2617,9 @@ function buildStructuredUsdResult(result) {
     debugAnchors: {
       ...(safe.debugAnchors || {}),
       buildVersion: BUILD_VERSION,
+      entryPermission: entryPermission.entryPermission,
+      entryPermissionReason: entryPermission.entryPermissionReason,
+      entryNextCondition: entryPermission.entryNextCondition,
       usd: {
         currentPriceAnchor: Number(metrics.current).toFixed(3),
         anchorSource: metrics.anchorSource,

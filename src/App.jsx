@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import "./App.css";
 
-const BUILD_VERSION = "v38-usdjpy-score-fallback";
+const BUILD_VERSION = "v39-entry-permission";
 
 const MODES = {
   USDJPY: {
@@ -498,7 +498,7 @@ function applyUsdFinalDisplayTextPolish(result, meta = {}) {
   if (Array.isArray(next.riskAlerts)) next.riskAlerts = next.riskAlerts.map(polishM15Down);
 
   if (longDominant && next.cancelCondition) {
-    const longDominantWait = "見送り継続：\n押し目形成や陽線確定が確認できない場合は、ロング優勢でも成行は見送り。";
+    const longDominantWait = "見送り継続：\n押し目形成や陽線確定が確認できない場合は、ロング方向でも成行は見送り。";
     const cancel = String(next.cancelCondition);
     next.cancelCondition = /見送り継続[:：]/.test(cancel)
       ? cancel.replace(/見送り継続[:：][\s\S]*$/, longDominantWait)
@@ -1472,6 +1472,9 @@ function buildAnchorDebugLines(debugAnchors) {
   const valueOrDash = (value) => value == null || value === "" ? "-" : value;
   return [
     `build: ${valueOrDash(debug.buildVersion || BUILD_VERSION)}`,
+    `entryPermission: ${valueOrDash(debug.entryPermission)}`,
+    `entryPermissionReason: ${valueOrDash(debug.entryPermissionReason)}`,
+    `entryNextCondition: ${valueOrDash(debug.entryNextCondition)}`,
     `usd currentPriceAnchor: ${valueOrDash(usd.currentPriceAnchor)}`,
     `usd anchorSource: ${valueOrDash(usd.anchorSource)}`,
     `usd rsi1m: ${valueOrDash(usd.rsi1m)}`,
@@ -1891,6 +1894,9 @@ function App() {
         `モード: ${currentMode.name}
 AI判定: ${normalized.decision}
 ステータス: ${normalized.entryStatus}
+エントリー可否: ${normalized.entryPermission || "-"}
+理由: ${normalized.entryPermissionReason || "-"}
+次の条件: ${normalized.entryNextCondition || "-"}
 LONG: ${normalized.longScore}点 / ${shortScoreLabel}: ${normalized.shortScore}点
 信頼度: ${normalized.confidence}
 
@@ -1971,6 +1977,15 @@ ${normalized.stopPlan || ""}`
     [normalizedAiResult, result, riskAlerts, entryCard]
   );
 
+  const entryPermissionCard = useMemo(
+    () => normalizedAiResult ? ({
+      label: normalizedAiResult.entryPermission || "完全見送り",
+      reason: normalizedAiResult.entryPermissionReason || "方向一致と反発・反落確認を待つ場面。",
+      nextCondition: normalizedAiResult.entryNextCondition || "候補価格帯での確定サインを待つ。",
+    }) : null,
+    [normalizedAiResult]
+  );
+
   const skipReasons = useMemo(
     () => deriveSkipReasons({ normalizedAiResult, result, riskAlerts }),
     [normalizedAiResult, result, riskAlerts]
@@ -1990,6 +2005,9 @@ ${normalized.stopPlan || ""}`
 モード：${currentMode.name}
 判定：${result.direction}
 状態：${result.statusText}
+エントリー可否：${normalizedAiResult.entryPermission || "-"}
+理由：${normalizedAiResult.entryPermissionReason || "-"}
+次の条件：${normalizedAiResult.entryNextCondition || "-"}
 LONG：${result.long}点
 ${shortScoreLabel}：${result.short}点
 差：${result.diff}点
@@ -2096,6 +2114,15 @@ ${(normalizedAiResult.reasons || []).map((r) => `・${r}`).join("\n")}`;
           <span className="statusText">{loading ? "判定中" : result.statusText}</span>
         </div>
 
+        {entryPermissionCard && (
+          <div className="entryPermissionInline">
+            <span className="entryPermissionLabel">エントリー可否</span>
+            <b>{entryPermissionCard.label}</b>
+            <p><span>理由：</span>{entryPermissionCard.reason}</p>
+            <p><span>次の条件：</span>{entryPermissionCard.nextCondition}</p>
+          </div>
+        )}
+
         <div className="scoreBox scoreRow">
           <div className="score scoreCard longScore"><span>LONG</span><b>{result.long}点</b></div>
           <div className="score scoreCard shortScore"><span>{shortScoreLabel}</span><b>{result.short}点</b></div>
@@ -2117,6 +2144,15 @@ ${(normalizedAiResult.reasons || []).map((r) => `・${r}`).join("\n")}`;
 
       {normalizedAiResult && (
         <section className="tradeCards">
+          {entryPermissionCard && (
+            <div className="quickCard entryPermissionCard">
+              <span className="quickLabel">エントリー可否</span>
+              <h3>{entryPermissionCard.label}</h3>
+              <p><b>理由：</b>{entryPermissionCard.reason}</p>
+              <p><b>次の条件：</b>{entryPermissionCard.nextCondition}</p>
+            </div>
+          )}
+
           <div className="dangerAlert risk-card">
             <div className="riskHeader">
               <h3>危険条件</h3>
