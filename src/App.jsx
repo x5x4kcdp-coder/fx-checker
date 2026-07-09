@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import "./App.css";
 
-const BUILD_VERSION = "v39-entry-permission";
+const BUILD_VERSION = "v40-mxn-recovered-usdjpy-risk-text";
 
 const MODES = {
   USDJPY: {
@@ -1484,6 +1484,8 @@ function buildAnchorDebugLines(debugAnchors) {
     `mxn currentPriceAnchor: ${valueOrDash(mxn.currentPriceAnchor)}`,
     `mxn anchorSource: ${valueOrDash(mxn.anchorSource)}`,
     `mxn buySummary: ${valueOrDash(mxn.buySummary)}`,
+    `mxn buySummaryRecovered: ${valueOrDash(mxn.buySummaryRecovered)}`,
+    `mxn tpBasis: ${valueOrDash(mxn.tpBasis)}`,
   ];
 }
 

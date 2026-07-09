@@ -8,7 +8,7 @@ dotenv.config();
 
 const app = express();
 const upload = multer({ storage: multer.memoryStorage() });
-const BUILD_VERSION = "v39-entry-permission";
+const BUILD_VERSION = "v40-mxn-recovered-usdjpy-risk-text";
 
 app.use(cors());
 app.use(express.json({ limit: "20mb" }));
@@ -447,9 +447,13 @@ function buildMxnDynamicLevels(currentPrice, buySummary) {
 
   const round3 = (n) => Number(n).toFixed(3);
   const gap = buy - current;
+  const currentMinusBuy = current - buy;
   const deepBelowBuySummary = gap >= 0.012;
-  const shallowBelowBuySummary = gap >= 0.003 && gap < 0.012;
-  const recoveredAboveBuySummary = gap < 0.003;
+  const shallowBelowBuySummary = gap > 0.003 && gap < 0.012;
+  const buySummaryBattle = Math.abs(currentMinusBuy) <= 0.003;
+  // v40: 明確に買サマリを上回っている場合だけ「回復後」として扱う。
+  // 近接中（±0.003以内）は買サマリ付近の攻防中として、可否を強く出しすぎない。
+  const recoveredAboveBuySummary = currentMinusBuy > 0.003;
 
   const longLow = current - 0.008;
   const longHigh = current + 0.002;
@@ -458,9 +462,32 @@ function buildMxnDynamicLevels(currentPrice, buySummary) {
   const shortLow = deepBelowBuySummary ? current + 0.007 : buy;
   const shortHigh = deepBelowBuySummary ? current + 0.017 : buy + 0.008;
 
-  const longTp1 = buy;
-  const longTp2 = deepBelowBuySummary ? buy + 0.009 : buy + 0.018;
-  const longTp3 = deepBelowBuySummary ? buy + 0.027 : buy + 0.033;
+  const longTpBase = Math.max(current, longHigh);
+  let tpBasis = recoveredAboveBuySummary ? "currentPrice/longEntryHigh" : "buySummary";
+  let longTp1;
+  let longTp2;
+  let longTp3;
+
+  if (recoveredAboveBuySummary) {
+    // 買サマリ回復後は、買サマリを利確目標ではなく維持確認ラインとして扱う。
+    longTp1 = longTpBase + 0.008;
+    longTp2 = longTpBase + 0.023;
+    longTp3 = longTpBase + 0.040;
+  } else {
+    longTp1 = buy;
+    longTp2 = deepBelowBuySummary ? buy + 0.009 : buy + 0.018;
+    longTp3 = deepBelowBuySummary ? buy + 0.027 : buy + 0.033;
+  }
+
+  // v40必須ガード：MXNJPYロングTPは、現在値とロング候補上限の両方より上に置く。
+  // TP順序が崩れた場合も、currentPrice/longEntryHigh基準で全て再計算する。
+  if (longTp1 <= longTpBase || longTp2 <= longTp1 || longTp3 <= longTp2) {
+    tpBasis = "currentPrice/longEntryHigh";
+    longTp1 = longTpBase + 0.008;
+    longTp2 = longTpBase + 0.023;
+    longTp3 = longTpBase + 0.040;
+  }
+
   const shortTp1 = current - 0.008;
   const shortTp2 = deepBelowBuySummary ? current - 0.018 : current - 0.023;
   const shortTp3 = deepBelowBuySummary ? current - 0.033 : current - 0.038;
@@ -473,9 +500,13 @@ function buildMxnDynamicLevels(currentPrice, buySummary) {
     currentPrice: round3(current),
     buySummary: round3(buy),
     gap: Number(gap.toFixed(4)),
+    currentMinusBuy: Number(currentMinusBuy.toFixed(4)),
     deepBelowBuySummary,
     shallowBelowBuySummary,
+    buySummaryBattle,
     recoveredAboveBuySummary,
+    buySummaryRecovered: recoveredAboveBuySummary,
+    tpBasis,
     longZone: `${round3(longLow)}〜${round3(longHigh)}`,
     recoveryZone: `${round3(recoveryLow)}〜${round3(recoveryHigh)}`,
     shortZone: `${round3(shortLow)}〜${round3(shortHigh)}`,
@@ -550,6 +581,9 @@ function buildMxnScoreState(levels) {
 
 function buildMxnEntryTextFromLevels(levels) {
   if (!levels) return "新規成行禁止。現在値と買サマリが確認できるまで見送り。";
+  if (levels.recoveredAboveBuySummary) {
+    return `新規成行禁止。\nロング候補：\n${levels.longZone}付近で下げ止まり、短期足の陽線確定またはEMA帯回復を確認できる場合のみ検討。\n買サマリ維持確認：\n${levels.recoveryZone}付近を割り込まず維持できる場合は、反発継続の確認材料。\n見送り条件：\n買サマリを明確に下回り、短期足が下向き継続する場合は、ロングせず見送り。`;
+  }
   return `新規成行禁止。\nロング候補：\n${levels.longZone}付近で下げ止まり、短期足の陽線確定またはEMA帯回復を確認できる場合のみ検討。\n回復確認候補：\n${levels.recoveryZone}付近を回復し、買サマリ上で維持できる場合は反発確認後のロングを検討。\n見送り条件：\n買サマリを大きく下回ったまま短期足が下向き継続する場合は、ロングせず見送り。`;
 }
 
@@ -653,8 +687,11 @@ function buildMxnSummaryFromLevels(levels, scoreState) {
   if (levels.deepBelowBuySummary || Number(scoreState?.short || 0) > Number(scoreState?.long || 0)) {
     return `日足の上昇背景は残るものの、現在は深い押し目に入っている。4時間足・1時間足は調整中で、買サマリ${levels.buySummary}付近をまだ回復できていない。現在値は${levels.currentPrice}付近で、買い急がず反発確認待ちが妥当。短期RSIは未確認のため断定せず、短期足の下げ止まり・陽線確定・EMA帯回復を待つ場面。`;
   }
-  if (levels.shallowBelowBuySummary) {
-    return `日足の上昇背景は残るものの、現在は押し目確認中。4時間足・1時間足・短期足は調整中で、買サマリ${levels.buySummary}付近をまだ回復できていない。現在値は${levels.currentPrice}付近で、短期の反発確認はまだ不足。短期RSIは未確認のため断定せず、短期足の下げ止まり・陽線確定・EMA帯回復を待つ場面。`;
+  if (levels.shallowBelowBuySummary || levels.buySummaryBattle) {
+    return `日足の上昇背景は残るものの、現在は買サマリ${levels.buySummary}付近の攻防中。4時間足・1時間足・短期足は調整中で、買サマリ上での維持確認はまだ不足。現在値は${levels.currentPrice}付近で、短期の反発確認を待ちたい。短期RSIは未確認のため断定せず、短期足の下げ止まり・陽線確定・EMA帯回復を待つ場面。`;
+  }
+  if (levels.recoveredAboveBuySummary) {
+    return `日足の上昇背景は残り、現在値は${levels.currentPrice}付近で買サマリ${levels.buySummary}付近を回復している。ただし短期足の反発確認はまだ不足しており、成行ロングは避けたい。短期RSIは未確認のため断定せず、買サマリ上の維持・短期足の陽線確定・EMA帯回復を待つ場面。`;
   }
   return `日足の上昇背景は残り、現在値は${levels.currentPrice}付近で買サマリ${levels.buySummary}付近を回復しつつある。ただし短期足の反発確認はまだ不足しており、成行ロングは避けたい。短期RSIは未確認のため断定せず、短期足の下げ止まり・陽線確定・EMA帯回復を待つ場面。`;
 }
@@ -676,10 +713,19 @@ function buildMxnReasonsFromLevels(levels, scoreState) {
       "短期RSIは未確認のため、反発確認前の成行ロングは禁止",
     ];
   }
+  if (levels.recoveredAboveBuySummary) {
+    return [
+      "日足の上昇背景は残る",
+      "現在値は買サマリを回復している",
+      "ただし短期足の反発維持確認はまだ必要",
+      "買サマリを維持できれば、押し目ロングの検討余地がある",
+      "短期RSIは未確認のため、反発確認前の成行ロングは禁止",
+    ];
+  }
   return [
     "日足の上昇背景は残る",
     "4時間足・1時間足は調整中で、短期の反発確認はまだ不足",
-    "短期足では反発の兆しがあるが、買サマリを下回る間は慎重に見送りたい",
+    "買サマリ付近の攻防中で、維持確認がまだ必要",
     "短期RSIは未確認のため、反発確認前の成行ロングは禁止",
   ];
 }
@@ -699,22 +745,22 @@ function buildMxnEntryPermission(levels, scoreState) {
       entryNextCondition: `${levels.buySummary}付近の買サマリ回復、または${levels.longZone}付近での下げ止まり・陽線確定・EMA帯回復を確認。`,
     };
   }
-  if (levels.shallowBelowBuySummary) {
+  if (levels.shallowBelowBuySummary || levels.buySummaryBattle) {
     return {
-      entryPermission: "条件付き可",
-      entryPermissionReason: "買サマリ直下で押し目確認中。短期足の陽線確定またはEMA帯回復があればロング検討可能。",
-      entryNextCondition: `${levels.recoveryZone}付近の回復維持、または${levels.longZone}付近の下げ止まりを確認。`,
+      entryPermission: "反発確認待ち",
+      entryPermissionReason: "買サマリ付近の攻防中で、まだ維持確認が不足。成行ロングは避け、短期足の反発確認を待ちたい。",
+      entryNextCondition: `${levels.recoveryZone}付近で買サマリ上の維持、または${levels.longZone}付近の下げ止まり・陽線確定を確認。`,
     };
   }
-  if (Number(levels.gap) <= 0) {
+  if (levels.recoveredAboveBuySummary) {
     return {
-      entryPermission: "可",
-      entryPermissionReason: "買サマリ回復後に維持できており、反発確認後のロングを検討できる位置。",
-      entryNextCondition: "買サマリ割れを撤退条件にして、短期足の陽線維持を確認。",
+      entryPermission: "条件付き可",
+      entryPermissionReason: "現在値は買サマリを回復しているが、短期足の反発確認はまだ不足。成行ロングは避け、陽線維持やEMA帯回復を確認したい。",
+      entryNextCondition: `買サマリ${levels.buySummary}付近を下回らず、15分足・1時間足で陽線維持またはEMA帯回復を確認できればロング検討。`,
     };
   }
   return {
-    entryPermission: "条件付き可",
+    entryPermission: "反発確認待ち",
     entryPermissionReason: "買サマリ回復に近いが、維持確認まではまだ慎重に見たい位置。",
     entryNextCondition: `${levels.recoveryZone}付近を回復し、買サマリ上で維持できるか確認。`,
   };
@@ -725,6 +771,7 @@ function applyMxnEntryPrefix(entryText, permission) {
   if (!entryText) return entryText;
   if (label === "可") return String(entryText).replace(/^新規成行禁止。/, "ロング検討可。");
   if (label === "条件付き可") return String(entryText).replace(/^新規成行禁止。/, "新規成行は慎重。条件成立後に検討。");
+  if (label === "反発確認待ち") return String(entryText).replace(/^新規成行禁止。/, "新規成行禁止。反発確認後に検討。");
   return entryText;
 }
 
@@ -785,6 +832,8 @@ function normalizeMxnSwapResult(result) {
       currentPriceAnchor: next.currentPrice,
       anchorSource: levels?.anchorSource || "fallback",
       buySummary: next.buySummary,
+      buySummaryRecovered: levels?.buySummaryRecovered ?? false,
+      tpBasis: levels?.tpBasis || null,
     },
   };
 
@@ -2519,17 +2568,17 @@ function buildStructuredMacdReason(tf, state, pair) {
   const pairText = pair ? `MACD値${Number(pair.macd).toFixed(4)} / シグナル値${Number(pair.signal).toFixed(4)}` : "MACD数値未確認";
   if (tf === "h1") {
     if (state === "up") return `1時間足MACDは${pair ? pairText + "で、" : ""}上位足のロング背景を支えている`;
-    if (state === "down") return `1時間足は反発の形があるが、MACD値はシグナル値を下回っており、上昇継続の確認はまだ必要`;
+    if (state === "down") return `1時間足は反発形を残すが、MACD値はシグナル値を下回っており、上昇継続の確認はまだ必要`;
     return "1時間足は方向確認中で、上昇継続の確認はまだ必要";
   }
   if (tf === "m15") {
     if (state === "up") return pair && Number(pair.macd) < 0 ? "15分足は弱気圏だが、MACDは上向き転換して改善中" : "15分足MACDはMACD値がシグナル値を上回り、上向き基調";
-    if (state === "down") return "15分足はロング背景を残すが、MACD値はシグナル値を下回っており、直近の勢いはやや鈍化している";
+    if (state === "down") return "15分足MACDはシグナルを下回っており、直近は下向き圧力が残る";
     return "15分足はロング背景を残すが、短期の勢いはまだ確認不足";
   }
   if (tf === "m5") {
     if (state === "up") return "5分足MACDは上向き転換気味で短期ロング加点";
-    if (state === "down") return "5分足MACDはMACD値がシグナル値を下回り、短期の勢いは確認不足";
+    if (state === "down") return pair && Number(pair.macd) < 0 ? "5分足MACDは弱気圏で、下落の勢いはやや鈍化しているが、上向き確定にはまだ不足" : "5分足MACDはシグナルを下回っており、短期の上昇勢いはまだ確認不足";
     return "5分足MACDは横ばい気味で、短期の勢いは確認中";
   }
   return "MACDは確認中";
@@ -2553,6 +2602,28 @@ function buildStructuredUsdSummary(metrics, score) {
 function buildStructuredUsdRiskAlerts(metrics, score) {
   const alerts = [];
   const rsi = metrics.rsi;
+  const decision = String(score?.decision || "");
+  const state = String(score?.state || "");
+  const fullAvoid = decision.includes("見送り") && state.includes("方向待ち");
+
+  if (fullAvoid) {
+    if (metrics.states.m5 === "down") {
+      alerts.push("5分足MACDがシグナルを下回っており、短期は下向き圧力が残る");
+    }
+    if (metrics.states.m15 === "down") {
+      alerts.push("15分足MACDがシグナルを下回っており、ロングは反発確認前に入ると危険");
+    }
+    if (!alerts.length) {
+      alerts.push("5分足と15分足の方向が揃わず、短期の方向判断が不安定");
+    }
+    alerts.push(metrics.states.h1 === "down"
+      ? "1時間足は反発形を残すが、MACD値はシグナル値を下回っており、上昇継続の確認はまだ不足"
+      : "1時間足は反発形を残すが、短期足と方向が一致していない");
+    alerts.push("現在値付近は戻り売りと押し目買いがぶつかりやすい");
+    alerts.push("反発/反落確認前の成行エントリーは禁止");
+    return [...new Set(alerts)].slice(0, 5);
+  }
+
   if (rsi != null && rsi >= 70) alerts.push("1分RSIが70以上のため、現在値からの追い買いは禁止。押し目形成を待つ場面。");
   else if (rsi != null && rsi >= 60) alerts.push("1分RSIが60台でやや高く、現在値からの追い買いは避けたい");
   else if (rsi != null && rsi <= 35) alerts.push("1分RSIが低く、反発確認前の逆張りロングは慎重に判断");
@@ -2571,6 +2642,17 @@ function sanitizeStructuredUsdForbiddenText(value) {
     .replace(/追い買い検討/g, "追い買いは禁止");
 }
 
+function buildStructuredUsdRsiReason(rsi) {
+  if (rsi == null) return "1分足RSIは数値確認中で、反発・反落の確定サインを待ちたい";
+  const value = Number(rsi);
+  if (value >= 70) return `1分足RSIは${value}で買われ過ぎ圏のため、現在値からは追い買いせず押し目形成を待ちたい位置`;
+  if (value >= 50 && value < 60) return "1分足RSIは50台で中立。反発・反落の確定サインを確認したい位置";
+  if (value >= 40 && value < 50) return "1分足RSIは40〜50付近で、反発確認を待ちたい位置";
+  if (value >= 30 && value < 40) return "1分足RSIは30台で売られすぎ気味。反発確認が入るまで逆張りは慎重に見たい位置";
+  if (value < 30) return "1分足RSIは30未満で売られすぎだが、反発確認前の逆張りは危険な位置";
+  return `1分足RSIは${value}で、反発・反落の確定サインを確認したい位置`;
+}
+
 function buildStructuredUsdResult(result) {
   const safe = sanitizeUsdJsonFallbackResult({ ...(result || {}) });
   const metrics = buildStructuredUsdMetrics(safe);
@@ -2581,11 +2663,7 @@ function buildStructuredUsdResult(result) {
     buildStructuredMacdReason("h1", metrics.states.h1, metrics.pairs.h1),
     buildStructuredMacdReason("m15", metrics.states.m15, metrics.pairs.m15),
     buildStructuredMacdReason("m5", metrics.states.m5, metrics.pairs.m5),
-    metrics.rsi != null
-      ? (metrics.rsi >= 70
-        ? `1分足RSIは${metrics.rsi}で買われ過ぎ圏のため、現在値からは追い買いせず押し目形成を待ちたい位置`
-        : `1分足RSIは${metrics.rsi}で、反発・反落の確定サインを確認したい位置`)
-      : "1分足RSIは数値確認中で、反発・反落の確定サインを待ちたい",
+    buildStructuredUsdRsiReason(metrics.rsi),
   ];
 
   const next = {
@@ -2871,6 +2949,8 @@ function attachDebugAnchors(result, mode) {
       currentPriceAnchor: levels?.currentPrice || next.currentPrice || null,
       anchorSource: levels?.anchorSource || next.debugAnchors?.mxn?.anchorSource || "fallback",
       buySummary: levels?.buySummary || next.buySummary || null,
+      buySummaryRecovered: levels?.buySummaryRecovered ?? next.debugAnchors?.mxn?.buySummaryRecovered ?? false,
+      tpBasis: levels?.tpBasis || next.debugAnchors?.mxn?.tpBasis || null,
     };
   } else {
     const current = Number(next.currentPrice ?? estimateUsdCurrentPrice(next));
